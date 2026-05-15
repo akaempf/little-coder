@@ -1,0 +1,241 @@
+{
+  "mcpServers": {
+    "atlassian-jira": {
+      "command": "mcp-atlassian-jira",
+      "args": [],
+      "env": {
+        "ATLASSIAN_SITE_NAME": "caremetx",
+        "ATLASSIAN_USER_EMAIL": "{env:JIRA_USERNAME}",
+        "ATLASSIAN_API_TOKEN": "{env:JIRA_API_TOKEN}",
+        "DT_ENVIRONMENT": "https://jop65683.apps.dynatrace.com"
+      },
+      "description": "Jira operations \u2014 issues, sprints, boards, JQL search",
+      "triggerKeywords": [
+        "jira",
+        "ticket",
+        "sprint",
+        "backlog",
+        "board",
+        "jql",
+        "story",
+        "epic",
+        "kanban",
+        "scrum",
+        "assignee",
+        "blocker",
+        "bug report",
+        "user story",
+        "acceptance criteria",
+        "story points",
+        "velocity",
+        "standup",
+        "retrospective"
+      ]
+    },
+    "atlassian-confluence": {
+      "command": "mcp-atlassian-confluence",
+      "args": [],
+      "env": {
+        "ATLASSIAN_SITE_NAME": "caremetx",
+        "ATLASSIAN_USER_EMAIL": "akaempf@caremetx.com",
+        "ATLASSIAN_API_TOKEN": "{env:CONFLUENCE_API_TOKEN}"
+      },
+      "description": "Confluence operations \u2014 pages, spaces, search, content",
+      "triggerKeywords": [
+        "confluence",
+        "wiki",
+        "knowledge base",
+        "runbook",
+        "playbook",
+        "postmortem",
+        "design doc",
+        "technical spec",
+        "team page"
+      ]
+    },
+    "github": {
+      "command": "mcp-server-github",
+      "args": [],
+      "env": {
+        "GITHUB_PERSONAL_ACCESS_TOKEN": "{env:GITHUB_TOKEN}"
+      },
+      "description": "GitHub operations \u2014 repos, issues, PRs, code search",
+      "triggerKeywords": [
+        "github",
+        "pull request",
+        "pr review",
+        "repo",
+        "repository",
+        "merge request",
+        "git issue",
+        "code review",
+        "github actions",
+        "workflow run",
+        "github release"
+      ]
+    },
+    "dynatrace": {
+      "command": "mcp-server-dynatrace",
+      "args": [],
+      "env": {
+        "DT_ENVIRONMENT": "https://jop65683.apps.dynatrace.com"
+      },
+      "description": "Dynatrace observability \u2014 problems, DQL queries, Davis AI",
+      "triggerKeywords": [
+        "dynatrace",
+        "davis ai",
+        "dql query",
+        "synthetic monitor",
+        "anomaly detection",
+        "service flow",
+        "distributed trace",
+        "log analytics"
+      ]
+    },
+    "filesystem": {
+      "command": "mcp-server-filesystem",
+      "args": [
+        "/Users/akaempf",
+        "/Volumes/DasWork"
+      ],
+      "env": {
+        "HOME": "/Users/akaempf"
+      },
+      "description": "sandboxed file operations on home and DasWork",
+      "triggerKeywords": [
+        "filesystem",
+        "list files",
+        "read file",
+        "write file",
+        "create file",
+        "delete file",
+        "move file",
+        "copy file",
+        "rename file",
+        "file tree",
+        "directory listing",
+        "directories",
+        "folder structure",
+        "file contents",
+        "save to file",
+        "home directory",
+        "DasWork"
+      ]
+    },
+    "mem0": {
+      "command": "mem0-mcp-selfhosted",
+      "args": [],
+      "env": {
+        "MEM0_USER_ID": "akaempf",
+        "MEM0_PROVIDER": "ollama",
+        "MEM0_LLM_MODEL": "nomic-embed-text",
+        "MEM0_EMBED_PROVIDER": "ollama",
+        "MEM0_EMBED_MODEL": "nomic-embed-text",
+        "MEM0_EMBED_DIMS": "768",
+        "MEM0_OLLAMA_URL": "http://localhost:11436",
+        "MEM0_QDRANT_URL": "http://localhost:6333",
+        "MEM0_COLLECTION": "opencode-memories",
+        "MEM0_ENABLE_GRAPH": "false"
+      },
+      "description": "semantic memory \u2014 store, search, manage memories with vector embeddings",
+      "autoActivate": false,
+      "triggerKeywords": [
+        "remember this",
+        "recall",
+        "memorize",
+        "store this for later",
+        "remember what",
+        "do you remember",
+        "save to memory",
+        "add to memory",
+        "save session",
+        "end session",
+        "goodbye",
+        "save everything",
+        "save all"
+      ],
+      "includeTools": [
+        "search_memories",
+        "add_memory",
+        "get_memories"
+      ]
+    },
+    "engram": {
+      "command": "engram",
+      "args": [
+        "mcp"
+      ],
+      "description": "structured memory \u2014 SQLite+FTS5 observations, sessions, timeline",
+      "autoActivate": false,
+      "triggerKeywords": [
+        "save session",
+        "session summary",
+        "note to self",
+        "decision log",
+        "learning log",
+        "save observation",
+        "end session"
+      ],
+      "includeTools": [
+        "mem_context",
+        "mem_search",
+        "mem_save",
+        "mem_session_summary",
+        "mem_session_start",
+        "mem_session_end"
+      ]
+    },
+    "sqz": {
+      "command": "sqz-mcp",
+      "args": [
+        "--transport",
+        "stdio"
+      ],
+      "description": "Token compression \u2014 read files, grep, list dirs with compressed output and dedup caching",
+      "autoActivate": false,
+      "triggerKeywords": [
+        "large file",
+        "big file",
+        "compressed",
+        "token save",
+        "read project",
+        "explore codebase",
+        "search codebase",
+        "find in project",
+        "list project"
+      ]
+    },
+    "context7": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@upstash/context7-mcp@latest"
+      ],
+      "description": "library documentation \u2014 query up-to-date docs and code examples for any framework",
+      "triggerKeywords": [
+        "context7",
+        "library docs",
+        "api reference",
+        "framework docs",
+        "documentation for",
+        "docs for",
+        "next.js",
+        "express docs",
+        "fastapi docs",
+        "django docs",
+        "flask docs",
+        "vue docs",
+        "angular docs",
+        "svelte docs",
+        "tailwind docs",
+        "prisma docs",
+        "drizzle docs",
+        "supabase docs"
+      ],
+      "excludeTools": [
+        "webfetch",
+        "websearch"
+      ]
+    }
+  }
+}
