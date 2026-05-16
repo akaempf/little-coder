@@ -5,6 +5,7 @@
 
 import { spawn } from "node:child_process";
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
+import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { checkForUpdate } from "./update-check.mjs";
@@ -29,7 +30,9 @@ const here = dirname(fileURLToPath(import.meta.url));
 const pkgRoot = resolve(here, "..");
 
 // ---- 3. Resolve the bundled pi binary ----
-const piBin = join(pkgRoot, "node_modules", ".bin", "pi");
+const isWindows = process.platform === "win32";
+const piBinBase = join(pkgRoot, "node_modules", ".bin", "pi");
+const piBin = isWindows && existsSync(`${piBinBase}.cmd`) ? `${piBinBase}.cmd` : piBinBase;
 if (!existsSync(piBin)) {
   console.error(
     `little-coder: cannot find pi at ${piBin}.\n` +
@@ -38,19 +41,24 @@ if (!existsSync(piBin)) {
   process.exit(1);
 }
 
-// ---- 4. Auto-discover bundled extensions ----
-const extDir = join(pkgRoot, ".pi", "extensions");
+// ---- 4. Auto-discover bundled + user extensions ----
+const extDirs = [
+  join(pkgRoot, ".pi", "extensions"),
+  join(homedir(), ".pi", "agent", "extensions"),
+];
 const extArgs = [];
-if (existsSync(extDir)) {
-  for (const name of readdirSync(extDir).sort()) {
-    const subdir = join(extDir, name);
-    const idx = join(subdir, "index.ts");
-    try {
-      if (statSync(subdir).isDirectory() && existsSync(idx)) {
-        extArgs.push("--extension", idx);
+for (const extDir of extDirs) {
+  if (existsSync(extDir)) {
+    for (const name of readdirSync(extDir).sort()) {
+      const subdir = join(extDir, name);
+      const idx = join(subdir, "index.ts");
+      try {
+        if (statSync(subdir).isDirectory() && existsSync(idx)) {
+          extArgs.push("--extension", idx);
+        }
+      } catch {
+        // skip unreadable entries
       }
-    } catch {
-      // skip unreadable entries
     }
   }
 }
@@ -65,16 +73,10 @@ try {
 }
 const exitAfterCheck = await checkForUpdate(currentVersion);
 if (exitAfterCheck) {
-  // Successful update happened; user needs to re-run the new binary.
   process.exit(0);
 }
 
 // ---- 6. Compose pi argv ----
-// --no-context-files : ignore the user's AGENTS.md / CLAUDE.md so OURS wins
-// --no-extensions    : skip pi's auto-discovery from cwd; explicit -e flags still load
-// --system-prompt    : load <pkgRoot>/AGENTS.md regardless of cwd
-//
-// Strip our own flags before forwarding to pi so it doesn't reject them.
 const userArgs = process.argv.slice(2).filter((a) => a !== "--no-update-check");
 const agentsMd = join(pkgRoot, "AGENTS.md");
 const piArgs = [
@@ -86,7 +88,11 @@ const piArgs = [
 ];
 
 // ---- 7. Spawn pi in the user's cwd ----
-const child = spawn(piBin, piArgs, {
+const [spawnCmd, spawnArgs] = isWindows
+  ? ["cmd.exe", ["/c", piBin, ...piArgs]]
+  : [piBin, piArgs];
+
+const child = spawn(spawnCmd, spawnArgs, {
   stdio: "inherit",
   cwd: process.cwd(),
   env: process.env,
