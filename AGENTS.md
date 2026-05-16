@@ -40,26 +40,13 @@ Servers: jira, confluence, github, dynatrace, filesystem, mem0, engram, context7
 ### Memory
 
 Two systems — engram (structured/keyword) and mem0 (semantic/vector).
-Memory servers stay idle between messages. Never activate on session start.
-
-**Default project**: Always `"pi"` for all engram calls. Never ask which project.
-
-**Auto-retrieval** (EVERY user message):
-On each user message, BEFORE composing your response:
-1. Extract 2-3 key terms/topics from the user's message
-2. Fire BOTH searches in parallel (single tool-use block):
-   - `mcp__engram__mem_search({query: "<key terms>", project: "pi", limit: 5})`
-   - `mcp__mem0__search_memories({query: "<natural language summary of question>", user_id: "akaempf", limit: 5})`
-3. If results are relevant → weave into your response naturally (don't dump raw memories)
-4. If no relevant results → proceed normally, don't mention the search
-5. Servers go back to idle — no persistent activation
-
-Skip auto-retrieval ONLY when:
-- Message is a trivial command ("yes", "ok", "continue", "do it")
-- Message is purely about general knowledge with no personal/project context
-- You're mid-task and the user is just confirming a step
+Memory is **on-demand only** — do NOT activate on session start. Only use when:
+- User explicitly says "save session", "remember this", "recall", etc.
+- You need to look up prior context the user asks about.
 
 If a memory tool call fails or the server isn't available, skip silently — never retry or ask the user about it.
+
+**Default project**: Always `"pi"` for all engram calls. Never ask which project.
 
 **Session end** (user says "save session"):
 Both servers auto-activate on keyword. You MUST call BOTH tools — make both calls in a single parallel tool-use block:
