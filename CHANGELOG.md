@@ -2,6 +2,95 @@
 
 All notable changes to little-coder are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and little-coder's public interface (CLI, providers, tools, skills) follows semver starting at `v0.0.1` post-rename.
 
+## [v1.4.1] — 2026-05-16
+
+Wire fix for the v1.4.0 startup rebrand. The `[Extensions]` block was still showing for users running from outside the repo root.
+
+### Fixed
+- **`quietStartup` is now actually applied for end users.** v1.4.0 set `"quietStartup": true` in our shipped `.pi/settings.json`, but pi reads global settings from `~/.pi/agent/settings.json` (or the dir pointed to by `PI_CODING_AGENT_DIR`) — not from the npm package's internal `.pi/`. So users running little-coder from anywhere outside the repo root still saw pi's full extension/skill/prompt inventory on startup. The launcher (`bin/little-coder.mjs`) now non-destructively merges `quietStartup: true` into the user's actual global pi settings on every launch, preserving any other keys. To see the inventory anyway: `little-coder --verbose`.
+- **Terminal title now reasserts on `turn_start` / `turn_end`.** Pi's `updateTerminalTitle()` fires multiple times during a session (init, provider count update, session-name change) and was clobbering our `setTitle("little-coder - <cwd>")` back to `π - <cwd>`. The branding extension now re-applies the title on every turn boundary, so after the first prompt the title stays correct.
+
+### Notes for upgraders
+- Existing keys in your `~/.pi/agent/settings.json` are preserved. The launcher only writes `quietStartup` if it isn't already `true`. If you'd previously set `"quietStartup": false` deliberately, you'll see the launcher overwrite it back to `true` — set `--verbose` per-invocation to see the inventory without disabling the global default.
+- No CLI flag, skill-pack, or API changes.
+
+---
+
+## [v1.4.0] — 2026-05-16
+
+Startup UI rebrand. The TUI's opening frame now reads as **little-coder**, not as pi. Pi remains the substrate; the chrome above it just stops pretending it's the product.
+
+### Added
+- **New `.pi/extensions/branding/` extension.** Calls `pi.ui.setHeader()` and `pi.ui.setTitle()` on every `session_start` event to install a little-coder banner: `little-coder vX.Y.Z` (logo) + `A coding agent tuned for small local models` (tagline, verbatim from the README opening line) + a compact keybinding-hint row. The terminal title goes from `π - <cwd>` to `little-coder - <cwd>`. Implementation pattern follows pi's bundled `examples/extensions/custom-header.ts` — the factory returns a duck-typed Component (`render(width): string[]`), so no deep imports of pi-tui internals are required.
+- **Startup screenshot in README.** A real `docs/assets/startup.svg` captured from a live `little-coder` startup, rendered via [charm.sh `freeze`](https://github.com/charmbracelet/freeze). Embedded near the top of the README so the first thing a visitor sees is the actual product, not a description of it.
+
+### Changed
+- **`.pi/settings.json` now ships `"quietStartup": true`.** This is what suppresses pi's built-in loaded-resources block — the long list of extension paths, skills, prompts, themes that previously flooded the screen on every launch. Power users who want the inventory back can pass `little-coder --verbose`, which sets pi's `verbose: true` and overrides `quietStartup`.
+- **Pi's "Pi can explain its own features..." onboarding string is gone.** The branding extension's `setHeader` replaces pi's built-in header entirely, so the line never renders.
+
+### Notes for upgraders
+- No API, settings, or skill-pack breaks. CLI flags unchanged.
+- If you'd customized pi's startup output via your own `models.json` / `.pi/settings.json` override, your changes still apply — the only new top-level key in shipped `.pi/settings.json` is `quietStartup`, and pi's override semantics preserve per-key user values.
+- To restore the original pi-style startup (the `pi vX.Y.Z` logo and the loaded-resources list), run `little-coder --verbose`. There's no way to disable the branding extension from the user side short of editing the installed package, but the rebrand is purely the startup frame — no functional difference.
+
+---
+
+## [v1.3.0] — 2026-05-16
+
+First functional release of Phase 2 (iterative improvement on real-world coding tasks). Three concrete sharp edges that surfaced while actually using the Mac → Linux LAN setup, plus a quality-of-life cleanup on the pi update banner. Minor version bump because three of the four changes are new behavior, all backwards-compatible.
+
+### Added
+- **`cp`, `mv`, `mkdir`, `touch` are now on the built-in bash whitelist.** The permission-gate's `BUILTIN_SAFE_PREFIXES` previously covered only read-only inspection (`ls`, `cat`, `git log`, `find`, `grep`, …), so the model couldn't move or copy a file it just created without flipping `LITTLE_CODER_PERMISSION_MODE=accept-all`. These four were the most common false-positive blocks on day-to-day editing work. Trailing-whitespace word-boundary convention preserved — `cp ` allows `cp a b` but not `cpufetch`. `rm` and `sudo` stay off the list by design; per-deployment escape hatch is still `LITTLE_CODER_BASH_ALLOW`. New positive + negative-boundary assertions in `.pi/extensions/permission-gate/permission.test.ts`.
+- **Image input on `llamacpp/qwen3.6-35b-a3b`.** `models.json` now declares `input: ["text", "image"]` for this entry, so pi's TUI no longer rejects clipboard / drag-and-drop screenshots. Pi already ships the full image-conversion / resize / OpenAI-format encoding stack (`@mariozechner/pi-coding-agent/dist/utils/{clipboard-image,image-resize,image-convert,mime}.js`); the gate was purely the capability flag on the model. README's *Option A — llama.cpp* now folds the vision projector into the canonical setup: an extra `hf download unsloth/Qwen3.6-35B-A3B-GGUF mmproj-F16.gguf` line and `--mmproj ~/models/mmproj-F16.gguf` on the `llama-server` command. Skip both lines if you want a text-only deployment.
+
+### Fixed
+- **Write tool no longer writes to filesystem root when the model emits `/<filename>`.** Previously the tool's schema described `file_path` as *"Absolute file path"*, so models that had no obvious working-directory context dutifully wrote `/person.md` — landing the file at the filesystem root instead of under cwd. `.pi/extensions/write-guard/index.ts` now runs a deterministic `normalizeWritePath()` before any filesystem call: a path matching `/^\/[^/]+$/` (root + single segment, no intermediate dirs) is rewritten to `<cwd>/<segment>` and the success message says so explicitly; bare filenames / relative paths are resolved against cwd up-front so the returned path is absolute; genuine system writes (`/etc/X`, `/tmp/Y/Z`) are passed through untouched. Tool description updated to give the model the right mental model. New unit-test module `.pi/extensions/write-guard/write-guard.test.ts` covers the five distinct path shapes.
+
+### Changed
+- **Pi's "Update Available" banner is suppressed by default.** `bin/little-coder.mjs` now defaults `PI_SKIP_VERSION_CHECK=1` unless you've explicitly set it. little-coder bundles `@mariozechner/pi-coding-agent` as an internal dependency pinned per release, so the in-session nag about updating pi was telling users to do something they shouldn't (and couldn't usefully) do — `npm install -g @mariozechner/pi-coding-agent@latest` doesn't affect the bundled copy. Opt back in with `PI_SKIP_VERSION_CHECK=0` if you want the banner. (The broader `PI_OFFLINE=1` is still your hammer for killing pi's other startup network calls — package-update check, tool auto-fetch, install telemetry.)
+
+### Notes for upgraders
+- No CLI flag, settings.json, or skill-pack breaks. Existing `LITTLE_CODER_BASH_ALLOW` overrides continue to compose on top of the (now-wider) built-in list. Existing `models.json` user-override files for the llamacpp provider continue to work unchanged; if you'd hand-rolled an override entry for `qwen3.6-35b-a3b` you'll keep its old `input` value until you redeclare it. Tool descriptions changed on Write, which the model sees as a system-prompt diff — no API surface change for you.
+
+---
+
+## [v1.2.1] — 2026-05-16
+
+Docs-only release marking two milestones: **Terminal-Bench 2.0 leaderboard acceptance** and the **end of the Phase 1 benchmark baseline**. No CLI, settings, or skill-pack changes — the env-var path for remote inference (`LLAMACPP_BASE_URL` / `OLLAMA_BASE_URL` / `LMSTUDIO_BASE_URL` pointing at a non-loopback host) has worked since v1.1.0 / v1.2.0, but it was undocumented for the LAN-server case until now.
+
+### Added
+- **README "Serving from another machine on your LAN" section** under *Local model setup → Option C*. Covers all three local providers (llama.cpp `--host 0.0.0.0`, LM Studio's *Serve on local network*, `OLLAMA_HOST=0.0.0.0:11434 ollama serve`), the corresponding `*_BASE_URL` env on the client, a `curl /v1/models` reachability check, and a note on opening port 1234 / 8888 / 11434 in `ufw`. Validated against this repo's own benchmark hardware: `LLAMACPP_BASE_URL=http://<lan-ip>:8888/v1` against `llama-server --host 0.0.0.0` serves Qwen3.6-35B-A3B to a different machine over WiFi at the same per-token throughput as loopback.
+
+### Changed
+- **Benchmark table — Terminal-Bench 2.0 rows.** Replaced the *"awaiting maintainer merge"* status (HuggingFace PRs [#158](https://huggingface.co/datasets/harborframework/terminal-bench-2-leaderboard/discussions/158) and [#163](https://huggingface.co/datasets/harborframework/terminal-bench-2-leaderboard/discussions/163)) with the accepted leaderboard placements published at [tbench.ai/leaderboard/terminal-bench/2.0](https://www.tbench.ai/leaderboard/terminal-bench/2.0): **Qwen3.6-35B-A3B at 24.6 % ± 3.2 (rank 120)** and **Qwen3.5-9B at 9.2 % ± 2.4 (rank 142)**. The mean shifted slightly from the originally-submitted point estimates (23.82 % → 24.6 %, 9.21 % → 9.2 %) once the leaderboard recomputed across all five trials with a confidence interval; the underlying runs are unchanged.
+- **Roadmap reframed.** Phase 1 (build a wide benchmark baseline across short coding exercises, interactive shell tasks, and tool-using research) is now marked **complete**: Aider Polyglot ✓, Terminal-Bench-Core v0.1.1 ✓, Terminal-Bench 2.0 ✓, GAIA validation ✓. Phase 2 opens now: **iterative improvement driven by real-world coding tasks**, not by the benchmark suite. New benchmarks (ProgramBench, SWE-bench Verified, GAIA test-split) are deferred until Phase 2 produces enough scaffolding signal to be worth re-measuring — re-benchmarking before the next round of changes lands would mostly re-measure the same baseline.
+
+### Notes for upgraders
+- No CLI flag, settings, or skill-pack breaks. Existing `LMSTUDIO_BASE_URL` / `LLAMACPP_BASE_URL` / `OLLAMA_BASE_URL` users on either loopback or remote hosts keep working with no changes; the only thing that changed is that the remote-host case is now documented.
+- No `models.json` or `.pi/settings.json` shape change. Per-model profiles (context limit, thinking budget, temperature) continue to apply regardless of where the inference server lives — they're keyed by `<provider>/<model-id>`, not by host.
+
+---
+
+## [v1.2.0] — 2026-05-10
+
+Issue-cleanup release that also ships built-in LM Studio support. Closes [#17](https://github.com/itayinbarr/little-coder/issues/17) (Windows), [#19](https://github.com/itayinbarr/little-coder/issues/19) (phantom Agent tool), [#21](https://github.com/itayinbarr/little-coder/issues/21) (skill param mismatch).
+
+### Added
+- **Built-in `lmstudio/local-model` provider.** [LM Studio](https://lmstudio.ai/) exposes an OpenAI-compatible server on `http://127.0.0.1:1234/v1` by default, and previously the only way to use it was to overload `LLAMACPP_BASE_URL`. Now you can run `little-coder --model lmstudio/local-model` and it routes to whatever model LM Studio currently has loaded — no extra config for the single-model case. New env knobs `LMSTUDIO_BASE_URL` (overrides baseUrl, parity with `LLAMACPP_BASE_URL`/`OLLAMA_BASE_URL`) and `LMSTUDIO_API_KEY` (any value; LM Studio ignores it locally but pi requires the env var to exist). README has a new **Option C — LM Studio** under *Local model setup*. `.pi/settings.json` ships a `lmstudio/local-model` profile so the same context/thinking-budget tuning as the llamacpp profiles applies.
+
+### Fixed
+- **Windows launch ([#17](https://github.com/itayinbarr/little-coder/issues/17), thanks @Grogger for [PR #18](https://github.com/itayinbarr/little-coder/pull/18)).** On Windows, `node_modules/.bin/pi` is a `.cmd` shim that Node 20's `spawn()` can't execute directly without `shell: true`, and `shell: true` reintroduces the CVE-2024-27980 / DEP0190 shell-injection class. The launcher now resolves `pi.cmd` on Windows and invokes `cmd.exe /c pi.cmd ...` with args as an array — works on Windows 11, no Linux/macOS regression.
+- **Edit skill documentation ([#21](https://github.com/itayinbarr/little-coder/issues/21)).** `skills/tools/edit.md` advertised `old_string` / `new_string`, but pi's Edit tool only accepts `oldText` / `newText` (single-edit form) or `edits: [{oldText, newText}]` (array form). Rewritten to show the canonical array form *and* the single-edit back-compat form. While in there, also corrected `skills/tools/read.md` and `skills/tools/write.md` (`file_path` → `path` — pi aliases both, but the canonical name is now in the docs) and `skills/tools/grep.md` (`include` → `glob`, `max_results` → `limit`; pi does not alias these, so the old skill could genuinely produce tool-call errors on the grep path the same way Edit did).
+
+### Changed
+- **Removed phantom `Agent` skill ([#19](https://github.com/itayinbarr/little-coder/issues/19)).** `skills/tools/agent.md` documented an `Agent` tool that little-coder never actually registered — pi ships `examples/extensions/subagent/` as a reference impl, but it was not wired up by default. Deleted the skill card and the `agent` / `delegate` / `spawn` keys from `.pi/extensions/skill-inject/index.ts`'s `INTENT_MAP` so the model is no longer told it has a delegation tool. The `skills/protocols/task_decomposition.md` cheatsheet is untouched — decomposition guidance does not depend on a delegation tool.
+
+### Notes for upgraders
+- No CLI flag, settings, or skill-pack breaks. `--model lmstudio/local-model` works out of the box if LM Studio is serving on its default port 1234 with a model loaded.
+- If you'd been overloading `LLAMACPP_BASE_URL=http://127.0.0.1:1234/v1` to point at LM Studio, that keeps working — but the cleaner path is now `--model lmstudio/local-model` with no env tweaking.
+
+---
+
 ## [v1.1.0] — 2026-05-03
 
 Issue-cleanup release. Three small features and one bug fix, driven by GitHub issues #12 / #13 / #15 / #16.
