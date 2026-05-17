@@ -30,7 +30,8 @@
         "velocity",
         "standup",
         "retrospective"
-      ]
+      ],
+      "autoActivate": false
     },
     "atlassian-confluence": {
       "command": "mcp-atlassian-confluence",
@@ -51,7 +52,8 @@
         "design doc",
         "technical spec",
         "team page"
-      ]
+      ],
+      "autoActivate": false
     },
     "github": {
       "command": "mcp-server-github",
@@ -64,15 +66,16 @@
         "github",
         "pull request",
         "pr review",
-        "repo",
-        "repository",
+        "github repo",
+        "github repository",
         "merge request",
         "git issue",
         "code review",
         "github actions",
         "workflow run",
         "github release"
-      ]
+      ],
+      "autoActivate": false
     },
     "dynatrace": {
       "command": "mcp-server-dynatrace",
@@ -90,7 +93,8 @@
         "service flow",
         "distributed trace",
         "log analytics"
-      ]
+      ],
+      "autoActivate": false
     },
     "filesystem": {
       "command": "mcp-server-filesystem",
@@ -120,7 +124,8 @@
         "save to file",
         "home directory",
         "DasWork"
-      ]
+      ],
+      "autoActivate": false
     },
     "mem0": {
       "command": "mem0-mcp-selfhosted",
@@ -235,7 +240,8 @@
       "excludeTools": [
         "webfetch",
         "websearch"
-      ]
+      ],
+      "autoActivate": false
     }
   }
 }

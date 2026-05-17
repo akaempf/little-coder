@@ -48,19 +48,44 @@ if (!existsSync(piBin)) {
   process.exit(1);
 }
 
-// ---- 4. Auto-discover bundled extensions ----
-const extDir = join(pkgRoot, ".pi", "extensions");
+// ---- 4. Auto-discover bundled + user extensions ----
+const extDirs = [
+  join(pkgRoot, ".pi", "extensions"),
+  join(homedir(), ".pi", "agent", "extensions"),
+];
 const extArgs = [];
-if (existsSync(extDir)) {
-  for (const name of readdirSync(extDir).sort()) {
-    const subdir = join(extDir, name);
-    const idx = join(subdir, "index.ts");
-    try {
-      if (statSync(subdir).isDirectory() && existsSync(idx)) {
-        extArgs.push("--extension", idx);
+for (const extDir of extDirs) {
+  if (existsSync(extDir)) {
+    for (const name of readdirSync(extDir).sort()) {
+      const subdir = join(extDir, name);
+      try {
+        if (!statSync(subdir).isDirectory()) continue;
+        const pkgPath = join(subdir, "package.json");
+        if (existsSync(pkgPath)) {
+          try {
+            const manifest = JSON.parse(readFileSync(pkgPath, "utf-8"));
+            const entries = manifest?.pi?.extensions;
+            if (Array.isArray(entries) && entries.length > 0) {
+              for (const entry of entries) {
+                const resolved = join(subdir, entry);
+                if (existsSync(resolved)) {
+                  extArgs.push("--extension", resolved);
+                }
+              }
+              continue;
+            }
+          } catch { /* invalid package.json, fall through */ }
+        }
+        const idxTs = join(subdir, "index.ts");
+        const idxJs = join(subdir, "index.js");
+        if (existsSync(idxTs)) {
+          extArgs.push("--extension", idxTs);
+        } else if (existsSync(idxJs)) {
+          extArgs.push("--extension", idxJs);
+        }
+      } catch {
+        // skip unreadable entries
       }
-    } catch {
-      // skip unreadable entries
     }
   }
 }

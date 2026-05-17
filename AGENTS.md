@@ -37,6 +37,19 @@ Manual: `mcp_activate("name")` / `mcp_deactivate("name")`.
 
 Servers: jira, confluence, github, dynatrace, filesystem, mem0, engram, context7.
 
+### Local vs Remote
+
+For local git operations (status, log, diff, commit, push), ALWAYS use `bash` with `git` commands. MCP tools like `github_search_repositories` are for GitHub API operations only (searching remote repos, creating PRs/issues). Never use the GitHub MCP to check local repo status.
+
+### Jira
+
+**CRITICAL**: The Jira search endpoint `/rest/api/3/search` is DEPRECATED and returns errors. Always use `/rest/api/3/search/jql` instead. When calling `atlassian-jira_jira_get` or constructing any Jira search request, ensure the JQL endpoint is used.
+
+**IMPORTANT**: Always include `"maxResults": "50"` in queryParams for search requests. The `/rest/api/3/search/jql` endpoint defaults to `maxResults=0` which returns a 400 error. Example:
+```
+atlassian-jira_jira_get(path="/rest/api/3/search/jql", queryParams={"jql": "assignee=currentUser() AND status != Done", "maxResults": "50"})
+```
+
 ### Memory
 
 Two systems — engram (structured/keyword) and mem0 (semantic/vector).
