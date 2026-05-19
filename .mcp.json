@@ -83,7 +83,7 @@
       "env": {
         "DT_ENVIRONMENT": "https://jop65683.apps.dynatrace.com"
       },
-      "description": "Dynatrace observability \u2014 problems, DQL queries, Davis AI",
+      "description": "Dynatrace observability — problems, DQL queries, Davis AI",
       "triggerKeywords": [
         "dynatrace",
         "davis ai",
@@ -94,89 +94,14 @@
         "distributed trace",
         "log analytics"
       ],
-      "autoActivate": false
-    },
-    "filesystem": {
-      "command": "mcp-server-filesystem",
-      "args": [
-        "/Users/akaempf",
-        "/Volumes/DasWork"
-      ],
-      "env": {
-        "HOME": "/Users/akaempf"
-      },
-      "description": "sandboxed file operations on home and DasWork",
-      "triggerKeywords": [
-        "filesystem",
-        "list files",
-        "read file",
-        "write file",
-        "create file",
-        "delete file",
-        "move file",
-        "copy file",
-        "rename file",
-        "file tree",
-        "directory listing",
-        "directories",
-        "folder structure",
-        "file contents",
-        "save to file",
-        "home directory",
-        "DasWork"
-      ],
-      "autoActivate": false
-    },
-    "sqz": {
-      "command": "sqz-mcp",
-      "args": [
-        "--transport",
-        "stdio"
-      ],
-      "description": "Token compression \u2014 read files, grep, list dirs with compressed output and dedup caching",
-      "autoActivate": false,
-      "triggerKeywords": [
-        "large file",
-        "big file",
-        "compressed",
-        "token save",
-        "read project",
-        "explore codebase",
-        "search codebase",
-        "find in project",
-        "list project"
-      ]
-    },
-    "context7": {
-      "command": "npx",
-      "args": [
-        "-y",
-        "@upstash/context7-mcp@latest"
-      ],
-      "description": "library documentation \u2014 query up-to-date docs and code examples for any framework",
-      "triggerKeywords": [
-        "context7",
-        "library docs",
-        "api reference",
-        "framework docs",
-        "documentation for",
-        "docs for",
-        "next.js",
-        "express docs",
-        "fastapi docs",
-        "django docs",
-        "flask docs",
-        "vue docs",
-        "angular docs",
-        "svelte docs",
-        "tailwind docs",
-        "prisma docs",
-        "drizzle docs",
-        "supabase docs"
-      ],
-      "excludeTools": [
-        "webfetch",
-        "websearch"
+      "includeTools": [
+        "execute_dql",
+        "list_problems",
+        "find_entity_by_name",
+        "list_vulnerabilities",
+        "list_exceptions",
+        "generate_dql_from_natural_language",
+        "chat_with_davis_copilot"
       ],
       "autoActivate": false
     }
