@@ -2,7 +2,7 @@
   "quietStartup": true,
   "compaction": {
     "enabled": true,
-    "reserveTokens": 8192
+    "reserveTokens": 12288
   },
   "retry": {
     "enabled": true,
@@ -29,7 +29,7 @@
         "temperature": 0.3
       },
       "llamacpp/qwen3.6-35b-a3b": {
-        "context_limit": 32768,
+        "context_limit": 49152,
         "max_tokens": 4096,
         "thinking_budget": 2048,
         "skill_token_budget": 300,

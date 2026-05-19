@@ -19,7 +19,7 @@
           "name": "Qwen3.6-35B-A3B (MoE, local llama.cpp)",
           "reasoning": true,
           "input": ["text", "image"],
-          "contextWindow": 32768,
+          "contextWindow": 49152,
           "maxTokens": 4096,
           "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0 }
         },
