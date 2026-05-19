@@ -1,7 +1,7 @@
 {
   "quietStartup": true,
   "compaction": {
-    "enabled": true,
+    "enabled": false,
     "reserveTokens": 12288
   },
   "retry": {
