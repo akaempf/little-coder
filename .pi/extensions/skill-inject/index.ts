@@ -89,14 +89,27 @@ function loadSkills(): void {
   }
 }
 
+const HIGH_PRIORITY_TOOLS = new Set([
+  "dynatrace_execute_dql",
+  "dynatrace_find_entity_by_name",
+  "dynatrace_list_problems",
+]);
+
 function predictTools(userText: string): string[] {
   const words = new Set(userText.toLowerCase().split(/\s+/).filter(Boolean));
-  const predicted: string[] = [];
+  const high: string[] = [];
+  const normal: string[] = [];
   for (const [kw, toolNames] of Object.entries(INTENT_MAP)) {
     if (!words.has(kw)) continue;
-    for (const tn of toolNames) if (!predicted.includes(tn)) predicted.push(tn);
+    for (const tn of toolNames) {
+      if (HIGH_PRIORITY_TOOLS.has(tn)) {
+        if (!high.includes(tn)) high.push(tn);
+      } else {
+        if (!normal.includes(tn)) normal.push(tn);
+      }
+    }
   }
-  return predicted;
+  return [...high, ...normal];
 }
 
 function selectSkills(prompt: string, budget: number): ToolSkill[] {
@@ -197,7 +210,7 @@ export default function (pi: ExtensionAPI) {
 
     const opts: any = (event as any).systemPromptOptions ?? {};
     const lc = opts.littleCoder ?? {};
-    const budget: number = lc.skillTokenBudget ?? 300;
+    const budget: number = lc.skillTokenBudget ?? 500;
     if (budget <= 0) return;
 
     // Allow-list source: prefer systemPromptOptions (set by tool-gating's
