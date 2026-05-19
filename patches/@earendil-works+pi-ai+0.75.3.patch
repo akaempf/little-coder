@@ -1,5 +1,5 @@
 diff --git a/node_modules/@earendil-works/pi-ai/dist/providers/openai-completions.js b/node_modules/@earendil-works/pi-ai/dist/providers/openai-completions.js
-index 4f2e1d5..cb1e423 100644
+index 1a96825..b397ffd 100644
 --- a/node_modules/@earendil-works/pi-ai/dist/providers/openai-completions.js
 +++ b/node_modules/@earendil-works/pi-ai/dist/providers/openai-completions.js
 @@ -1,4 +1,5 @@
@@ -8,7 +8,7 @@ index 4f2e1d5..cb1e423 100644
  import { getEnvApiKey } from "../env-api-keys.js";
  import { calculateCost, clampThinkingLevel } from "../models.js";
  import { AssistantMessageEventStream } from "../utils/event-stream.js";
-@@ -293,6 +294,74 @@ export const streamOpenAICompletions = (model, context, options) => {
+@@ -296,6 +297,74 @@ export const streamOpenAICompletions = (model, context, options) => {
                      }
                  }
              }
@@ -83,7 +83,7 @@ index 4f2e1d5..cb1e423 100644
              for (const block of blocks) {
                  finishBlock(block);
              }
-@@ -416,6 +485,7 @@ function buildParams(model, context, options, compat = getCompat(model), cacheRe
+@@ -419,6 +488,7 @@ function buildParams(model, context, options, compat = getCompat(model), cacheRe
      }
      if (context.tools && context.tools.length > 0) {
          params.tools = convertTools(context.tools, compat);
@@ -92,7 +92,7 @@ index 4f2e1d5..cb1e423 100644
              params.tool_stream = true;
          }
 diff --git a/node_modules/@earendil-works/pi-ai/dist/providers/openai-responses-shared.js b/node_modules/@earendil-works/pi-ai/dist/providers/openai-responses-shared.js
-index bce3125..03e4d2f 100644
+index bce3125..6d2ba48 100644
 --- a/node_modules/@earendil-works/pi-ai/dist/providers/openai-responses-shared.js
 +++ b/node_modules/@earendil-works/pi-ai/dist/providers/openai-responses-shared.js
 @@ -219,6 +219,10 @@ export async function processResponsesStream(openaiStream, output, stream, model
@@ -100,8 +100,8 @@ index bce3125..03e4d2f 100644
      const blockIndex = () => blocks.length - 1;
      for await (const event of openaiStream) {
 +        // Check for abort signal during streaming
-+        if (options?.signal?.aborted) {
-+            throw new Error("Request was aborted");
++        if (signal?.aborted) {
++            break;
 +        }
          if (event.type === "response.created") {
              output.responseId = event.response.id;
