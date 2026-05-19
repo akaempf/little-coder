@@ -56,11 +56,13 @@ const INTENT_MAP: Record<string, string[]> = {
   browse: ["BrowserNavigate", "BrowserExtract"],
   page: ["BrowserExtract"],
   click: ["BrowserClick"],
-  dynatrace: ["dynatrace_execute_dql"],
+  dynatrace: ["dynatrace_execute_dql", "dynatrace_find_entity_by_name"],
   dql: ["dynatrace_execute_dql"],
   cpu: ["dynatrace_execute_dql"],
   metrics: ["dynatrace_execute_dql"],
-  observability: ["dynatrace_execute_dql"],
+  observability: ["dynatrace_execute_dql", "dynatrace_list_problems"],
+  problem: ["dynatrace_list_problems"],
+  problems: ["dynatrace_list_problems"],
 };
 
 function skillsDir(): string {

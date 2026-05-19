@@ -6,30 +6,29 @@ priority: 10
 token_cost: 200
 user-invocable: false
 ---
-## Dynatrace DQL Tool Guidance
+## DQL Syntax (MUST follow exactly)
 
-Tools: `dynatrace_execute_dql`, `dynatrace_list_problems`, `dynatrace_find_entity_by_name`, `dynatrace_list_vulnerabilities`, `dynatrace_list_exceptions`, `dynatrace_generate_dql_from_natural_language`, `dynatrace_chat_with_davis_copilot`
+### Timeseries (CPU, memory, disk metrics)
 
-### Investigation Workflow
+```dql
+timeseries avg(dt.host.cpu.usage), by:{dt.entity.host}
+| filter dt.entity.host == "HOST-EA042072E93CEB4B"
+| limit 10
+```
 
-1. **Triage**: `dynatrace_list_problems` to see active issues
-2. **Identify entities**: `dynatrace_find_entity_by_name` to get entity IDs
-3. **Query data**: `dynatrace_execute_dql` with the entity ID from step 2
-4. **Ask Davis**: `dynatrace_chat_with_davis_copilot` for causal analysis
+```dql
+timeseries avg(dt.process.cpu.usage), by:{dt.entity.process_group_instance}
+| filter dt.entity.host == "HOST-EA042072E93CEB4B"
+| sort avg(dt.process.cpu.usage) desc
+| limit 10
+```
 
-### DQL Syntax Rules
-
-- **DO NOT** put timeframe in the query string. Use the `from` and `to` parameters of the tool instead.
-- **Filter early** — use `filter` before `summarize`
-- **Short time ranges** (1h-24h) to control cost
-- Common fetch targets: `fetch logs`, `fetch events`, `fetch spans`, `fetch dt.entity.service`, `fetch dt.entity.host`
-
-### Example Queries
+### Fetch (logs, events, entities)
 
 ```dql
 fetch logs
+| filter dt.entity.host == "HOST-EA042072E93CEB4B"
 | filter loglevel == "ERROR"
-| filter contains(dt.entity.service, "SERVICE-ABC123")
 | sort timestamp desc
 | limit 50
 ```
@@ -37,20 +36,30 @@ fetch logs
 ```dql
 fetch events
 | filter event.type == "PROBLEM"
-| fields event.id, event.description, event.status, event.category, timestamp
 | sort timestamp desc
 | limit 20
 ```
 
+### Smartscape (entity details, relationships)
+
 ```dql
-fetch dt.entity.host
-| filter entity.name == "my-host"
-| fieldsAdd cpuUsage = avg(dt.host.cpu.usage)
+smartscapeNodes "HOST"
+| filter id == toSmartscapeId("HOST-EA042072E93CEB4B")
 ```
 
-### CRITICAL: Avoid Loops
+```dql
+smartscapeEdges "*"
+| filter source_id == toSmartscapeId("HOST-EA042072E93CEB4B") or target_id == toSmartscapeId("HOST-EA042072E93CEB4B")
+```
 
-- If DQL returns an error, **do not retry the same query**. Fix the syntax or ask `dynatrace_generate_dql_from_natural_language` to generate the correct query.
-- If rate limited, STOP and summarize what you have so far.
-- If you need entity IDs, use `dynatrace_find_entity_by_name` first — never guess entity IDs.
-- **Maximum 3 DQL calls per task.** After 3, summarize findings and ask the user.
+### RULES
+
+- `timeseries` MUST be the FIRST command (never after `fetch` or pipe)
+- DO NOT use `fetch [metrics]` — use `timeseries` directly
+- DO NOT use `metrics | filter ...` — that syntax does NOT work
+- DO NOT put timeframe in query — use the tool's `from`/`to` params
+- Entity IDs are strings: `"HOST-..."` not function calls
+- IGNORE the "Next Steps" suggestions returned by `dynatrace_find_entity_by_name` — they contain incorrect DQL syntax. Use ONLY the examples above.
+- After DQL error: use `dynatrace_generate_dql_from_natural_language` to get correct syntax
+- If rate limited: STOP, summarize findings, ask user
+- **Maximum 3 DQL calls per task.** After 3, summarize and ask user.
