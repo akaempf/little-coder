@@ -127,69 +127,6 @@
       ],
       "autoActivate": false
     },
-    "mem0": {
-      "command": "mem0-mcp-selfhosted",
-      "args": [],
-      "env": {
-        "MEM0_USER_ID": "akaempf",
-        "MEM0_PROVIDER": "ollama",
-        "MEM0_LLM_MODEL": "nomic-embed-text",
-        "MEM0_EMBED_PROVIDER": "ollama",
-        "MEM0_EMBED_MODEL": "nomic-embed-text",
-        "MEM0_EMBED_DIMS": "768",
-        "MEM0_OLLAMA_URL": "http://localhost:11436",
-        "MEM0_QDRANT_URL": "http://localhost:6333",
-        "MEM0_COLLECTION": "opencode-memories",
-        "MEM0_ENABLE_GRAPH": "false"
-      },
-      "description": "semantic memory \u2014 store, search, manage memories with vector embeddings",
-      "autoActivate": false,
-      "triggerKeywords": [
-        "remember this",
-        "recall",
-        "memorize",
-        "store this for later",
-        "remember what",
-        "do you remember",
-        "save to memory",
-        "add to memory",
-        "save session",
-        "end session",
-        "goodbye",
-        "save everything",
-        "save all"
-      ],
-      "includeTools": [
-        "search_memories",
-        "add_memory",
-        "get_memories"
-      ]
-    },
-    "engram": {
-      "command": "engram",
-      "args": [
-        "mcp"
-      ],
-      "description": "structured memory \u2014 SQLite+FTS5 observations, sessions, timeline",
-      "autoActivate": false,
-      "triggerKeywords": [
-        "save session",
-        "session summary",
-        "note to self",
-        "decision log",
-        "learning log",
-        "save observation",
-        "end session"
-      ],
-      "includeTools": [
-        "mem_context",
-        "mem_search",
-        "mem_save",
-        "mem_session_summary",
-        "mem_session_start",
-        "mem_session_end"
-      ]
-    },
     "sqz": {
       "command": "sqz-mcp",
       "args": [

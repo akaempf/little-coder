@@ -35,7 +35,7 @@ Additional tools appear per benchmark: `BrowserNavigate`/`Click`/`Type`/`Scroll`
 Auto-activated by keyword. Tools appear as `mcp__<server>__<tool>`.
 Manual: `mcp_activate("name")` / `mcp_deactivate("name")`.
 
-Servers: jira, confluence, github, dynatrace, filesystem, mem0, engram, context7.
+Servers: jira, confluence, github, dynatrace, filesystem, sqz, context7.
 
 ### Local vs Remote
 
@@ -52,22 +52,16 @@ atlassian-jira_jira_get(path="/rest/api/3/search/jql", queryParams={"jql": "assi
 
 ### Memory
 
-Two systems — engram (structured/keyword) and mem0 (semantic/vector).
-Memory is **on-demand only** — do NOT activate on session start. Only use when:
-- User explicitly says "save session", "remember this", "recall", etc.
-- You need to look up prior context the user asks about.
+agentmemory — runs as a **pi extension** (not MCP). Talks directly to REST API at `:3111`.
+- Auto-searches memory and injects relevant context into system prompt before every turn (`before_agent_start`)
+- Auto-saves turns after every response (`agent_end`)
+- Exposes two native tools: `memory_search` and `memory_save`
 
-If a memory tool call fails or the server isn't available, skip silently — never retry or ask the user about it.
+No keyword activation needed — it's always active via the extension lifecycle. If the server is unreachable, it warns once and continues silently.
 
-**Default project**: Always `"pi"` for all engram calls. Never ask which project.
-
-**Session end** (user says "save session"):
-Both servers auto-activate on keyword. You MUST call BOTH tools — make both calls in a single parallel tool-use block:
-- `mcp__engram__mem_save({title: "...", content: "...", project: "pi", type: "session"})`
-- `mcp__mem0__add_memory({text: "concise summary of session", user_id: "akaempf"})`
-Never skip mem0. Never deactivate one before calling the other.
-
-**During work** (only when relevant): save decisions/bugfixes to engram (project: "pi"), preferences to mem0.
+**To explicitly recall something**: use the `memory_search` tool directly.
+**To save something**: use `memory_save` with a concise description.
+**During work** (only when relevant): call `memory_save` for decisions, bugfixes, preferences worth keeping.
 
 # Approaching complex tasks
 
