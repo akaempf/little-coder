@@ -1,0 +1,145 @@
+--- package/dist/agent-loop.js	1985-10-26 04:15:00
++++ /Volumes/DasWork/akaempf/little-coder/node_modules/@earendil-works/pi-agent-core/dist/agent-loop.js	2026-05-19 18:10:50
+@@ -3,6 +3,8 @@
+  * Transforms to Message[] only at the LLM call boundary.
+  */
+ import { EventStream, streamSimple, validateToolArguments, } from "@earendil-works/pi-ai";
++let _steeringInterrupt = false;
++let _pendingSteeringMessages = [];
+ /**
+  * Start an agent loop with a new prompt message.
+  * The prompt is added to the context and events are emitted for it.
+@@ -80,6 +82,8 @@
+     let firstTurn = true;
+     // Check for steering messages at start (user may have typed while waiting)
+     let pendingMessages = (await config.getSteeringMessages?.()) || [];
++    _steeringInterrupt = false;
++    _pendingSteeringMessages = [];
+     // Outer loop: continues when queued follow-up messages arrive after agent would stop
+     while (true) {
+         let hasMoreToolCalls = true;
+@@ -104,8 +108,29 @@
+             // Stream assistant response
+             const message = await streamAssistantResponse(currentContext, config, signal, emit, streamFn);
+             newMessages.push(message);
+-            if (message.stopReason === "error" || message.stopReason === "aborted") {
++            if (message.stopReason === "error" || message.stopReason === "aborted" || _steeringInterrupt) {
+                 await emit({ type: "turn_end", message, toolResults: [] });
++                process.stderr.write(`[steer-debug] stopReason=${message.stopReason} _steeringInterrupt=${_steeringInterrupt}\n`);
++                if (_steeringInterrupt) {
++                    _steeringInterrupt = false;
++                    const steeringOnAbort = _pendingSteeringMessages.length > 0
++                        ? _pendingSteeringMessages.splice(0)
++                        : (await config.getSteeringMessages?.()) || [];
++                    if (steeringOnAbort.length > 0) {
++                        const partialText = message.content
++                            ?.filter((c) => c.type === "text")
++                            .map((c) => c.text)
++                            .join("") || "";
++                        const snippet = partialText.length > 300 ? partialText.slice(-300) : partialText;
++                        const resumeText = snippet
++                            ? `[System: You were interrupted mid-task. Your last partial output was:\n---\n${snippet}\n---\nAddress the user message above, then continue your original task from exactly where you left off. Do not restart from scratch.]`
++                            : `[System: You were interrupted mid-task. Address the user message above, then continue your original task from where you left off. Do not restart from scratch.]`;
++                        const resumeMsg = { role: "user", content: [{ type: "text", text: resumeText }] };
++                        pendingMessages = [...steeringOnAbort, resumeMsg];
++                        firstTurn = false;
++                        continue;
++                    }
++                }
+                 await emit({ type: "agent_end", messages: newMessages });
+                 return;
+             }
+@@ -151,7 +176,10 @@
+                 await emit({ type: "agent_end", messages: newMessages });
+                 return;
+             }
+-            pendingMessages = (await config.getSteeringMessages?.()) || [];
++            pendingMessages = _pendingSteeringMessages.length > 0
++                ? _pendingSteeringMessages.splice(0)
++                : (await config.getSteeringMessages?.()) || [];
++            if (pendingMessages.length > 0) process.stderr.write(`[steer-debug] end-of-turn: picked up ${pendingMessages.length} steering msg(s)\n`);
+         }
+         // Agent would stop here. Check for follow-up messages.
+         const followUpMessages = (await config.getFollowUpMessages?.()) || [];
+@@ -185,15 +213,34 @@
+     };
+     const streamFunction = streamFn || streamSimple;
+     // Resolve API key (important for expiring tokens)
+-    const resolvedApiKey = (config.getApiKey ? await config.getApiKey(config.model.provider) : undefined) || config.apiKey;
++    const resolvedApiKey = (config.getApiKey ? await config.getApiKey(config.model.provider) : undefined) || config
++    const steerController = new AbortController();
++    if (signal) {
++        signal.addEventListener("abort", () => steerController.abort(), { once: true });
++    }
+     const response = await streamFunction(config.model, llmContext, {
+         ...config,
+         apiKey: resolvedApiKey,
+-        signal,
++        signal: steerController.signal,
+     });
+     let partialMessage = null;
+     let addedPartial = false;
++    try {
+     for await (const event of response) {
++        if (signal?.aborted) {
++            break;
++        }
++        const hasActiveTool = partialMessage?.content?.some((c) => c.type === "toolCall");
++        if (!hasActiveTool) {
++            const pendingSteering = (await config.getSteeringMessages?.()) || [];
++            if (pendingSteering.length > 0) {
++                process.stderr.write(`[steer-debug] detected steering mid-stream, aborting\n`);
++                _steeringInterrupt = true;
++                _pendingSteeringMessages = pendingSteering;
++                steerController.abort();
++                break;
++            }
++        }
+         switch (event.type) {
+             case "start":
+                 partialMessage = event.partial;
+@@ -237,6 +284,22 @@
+             }
+         }
+     }
++    } catch (err) {
++        if (_steeringInterrupt || steerController.signal.aborted) {
++            process.stderr.write(`[steer-debug] stream aborted via exception\n`);
++        } else {
++            throw err;
++        }
++    }
++    if (_steeringInterrupt) {
++        const abortedMessage = partialMessage
++            ? { ...partialMessage, stopReason: "aborted", usage: partialMessage.usage ?? { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: { total: 0 } } }
++            : { role: "assistant", content: [], stopReason: "aborted", usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, cost: { total: 0 } } };
++        if (!addedPartial) context.messages.push(abortedMessage);
++        else context.messages[context.messages.length - 1] = abortedMessage;
++        await emit({ type: "message_end", message: abortedMessage });
++        return abortedMessage;
++    }
+     const finalMessage = await response.result();
+     if (addedPartial) {
+         context.messages[context.messages.length - 1] = finalMessage;
+@@ -263,6 +326,12 @@
+     const finalizedCalls = [];
+     const messages = [];
+     for (const toolCall of toolCalls) {
++        const pendingSteering = (await config.getSteeringMessages?.()) || [];
++        if (pendingSteering.length > 0) {
++            _steeringInterrupt = true;
++            _pendingSteeringMessages = pendingSteering;
++            break;
++        }
+         await emit({
+             type: "tool_execution_start",
+             toolCallId: toolCall.id,
+@@ -290,7 +359,7 @@
+     }
+     return {
+         messages,
+-        terminate: shouldTerminateToolBatch(finalizedCalls),
++        terminate: shouldTerminateToolBatch(finalizedCalls) || _steeringInterrupt,
+     };
+ }
+ async function executeToolCallsParallel(currentContext, assistantMessage, toolCalls, config, signal, emit) {
