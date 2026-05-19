@@ -1,12 +1,24 @@
 diff --git a/node_modules/@earendil-works/pi-agent-core/dist/agent-loop.js b/node_modules/@earendil-works/pi-agent-core/dist/agent-loop.js
 --- a/node_modules/@earendil-works/pi-agent-core/dist/agent-loop.js
 +++ b/node_modules/@earendil-works/pi-agent-core/dist/agent-loop.js
-@@ -107,8 +107,17 @@ async function runLoop(initialContext, newMessages, initialConfig, signal, emit,
+@@ -5,6 +5,8 @@ import { EventStream, streamSimple, validateToolArguments, } from "@earendil-wo
++let _steeringInterrupt = false;
+ /**
+  * Start an agent loop with a new prompt message.
+
+@@ -78,6 +80,7 @@ async function runLoop(initialContext, newMessages, initialConfig, signal, emit,
+     // Check for steering messages at start (user may have typed while waiting)
+     let pendingMessages = (await config.getSteeringMessages?.()) || [];
++    _steeringInterrupt = false;
+     // Outer loop: continues when queued follow-up messages arrive after agent would stop
+
+@@ -107,12 +111,16 @@ async function runLoop(initialContext, newMessages, initialConfig, signal, emit,
              if (message.stopReason === "error" || message.stopReason === "aborted") {
                  await emit({ type: "turn_end", message, toolResults: [] });
 -                await emit({ type: "agent_end", messages: newMessages });
 -                return;
-+                if (message.stopReason === "aborted") {
++                if (_steeringInterrupt) {
++                    _steeringInterrupt = false;
 +                    const steeringOnAbort = (await config.getSteeringMessages?.()) || [];
 +                    if (steeringOnAbort.length > 0) {
 +                        pendingMessages = steeringOnAbort;
@@ -17,17 +29,14 @@ diff --git a/node_modules/@earendil-works/pi-agent-core/dist/agent-loop.js b/nod
 +                await emit({ type: "agent_end", messages: newMessages });
 +                return;
              }
-@@ -194,6 +203,14 @@ async function streamAssistantResponse(context, config, signal, emit, streamFn)
-     let partialMessage = null;
-     let addedPartial = false;
-     for await (const event of response) {
-+        if (signal?.aborted) {
-+            break;
-+        }
-+        const pendingSteering = (await config.getSteeringMessages?.()) || [];
-+        if (pendingSteering.length > 0) {
-+            signal?.abort?.();
-+            break;
-+        }
-         switch (event.type) {
-             case "start":
+
+@@ -207,9 +215,9 @@ async function streamAssistantResponse(context, config, signal, emit, streamFn)
+         if (signal?.aborted) {
+             break;
+         }
+         const pendingSteering = (await config.getSteeringMessages?.()) || [];
+         if (pendingSteering.length > 0) {
+-            signal?.abort?.();
++            _steeringInterrupt = true;
+             break;
+         }
