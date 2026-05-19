@@ -13,6 +13,13 @@ let consecutiveFailures = 0;
 const MAX_CONSECUTIVE_CORRECTIONS = 1; // abort quickly — local models ignore steering
 
 export default function (pi: ExtensionAPI) {
+  // Reset per-turn state on each new agent turn so an abort+followUp doesn't
+  // enter the next turn already over the failure threshold.
+  pi.on("agent_end", async () => {
+    consecutiveFailures = 0;
+    previousToolCalls = [];
+  });
+
   // Populate the known-tools set lazily by observing tool_execution events.
   // This avoids needing to read pi's tool registry directly.
   const knownTools = new Set<string>();
