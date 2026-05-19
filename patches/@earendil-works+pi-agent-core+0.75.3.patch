@@ -1,25 +1,29 @@
 diff --git a/node_modules/@earendil-works/pi-agent-core/dist/agent-loop.js b/node_modules/@earendil-works/pi-agent-core/dist/agent-loop.js
 --- a/node_modules/@earendil-works/pi-agent-core/dist/agent-loop.js
 +++ b/node_modules/@earendil-works/pi-agent-core/dist/agent-loop.js
-@@ -5,6 +5,8 @@ import { EventStream, streamSimple, validateToolArguments, } from "@earendil-wo
+@@ -5,6 +5,9 @@ import { EventStream, streamSimple, validateToolArguments, } from "@earendil-wo
 +let _steeringInterrupt = false;
++let _pendingSteeringMessages = [];
  /**
   * Start an agent loop with a new prompt message.
 
-@@ -78,6 +80,7 @@ async function runLoop(initialContext, newMessages, initialConfig, signal, emit,
+@@ -78,6 +81,8 @@ async function runLoop(initialContext, newMessages, initialConfig, signal, emit,
      // Check for steering messages at start (user may have typed while waiting)
      let pendingMessages = (await config.getSteeringMessages?.()) || [];
 +    _steeringInterrupt = false;
-     // Outer loop: continues when queued follow-up messages arrive after agent would stop
++    _pendingSteeringMessages = [];
+     // Outer loop
 
-@@ -107,12 +111,16 @@ async function runLoop(initialContext, newMessages, initialConfig, signal, emit,
-             if (message.stopReason === "error" || message.stopReason === "aborted") {
+@@ -107,12 +112,22 @@ async function runLoop(initialContext, newMessages, initialConfig, signal, emit,
+             if (message.stopReason === "error" || message.stopReason === "aborted" || _steeringInterrupt) {
                  await emit({ type: "turn_end", message, toolResults: [] });
 -                await emit({ type: "agent_end", messages: newMessages });
 -                return;
 +                if (_steeringInterrupt) {
 +                    _steeringInterrupt = false;
-+                    const steeringOnAbort = (await config.getSteeringMessages?.()) || [];
++                    const steeringOnAbort = _pendingSteeringMessages.length > 0
++                        ? _pendingSteeringMessages.splice(0)
++                        : (await config.getSteeringMessages?.()) || [];
 +                    if (steeringOnAbort.length > 0) {
 +                        pendingMessages = steeringOnAbort;
 +                        firstTurn = false;
@@ -30,13 +34,41 @@ diff --git a/node_modules/@earendil-works/pi-agent-core/dist/agent-loop.js b/nod
 +                return;
              }
 
-@@ -207,9 +215,9 @@ async function streamAssistantResponse(context, config, signal, emit, streamFn)
+@@ -164,7 +179,10 @@ async function runLoop(initialContext, newMessages, initialConfig, signal, emit,
+-            pendingMessages = (await config.getSteeringMessages?.()) || [];
++            pendingMessages = _pendingSteeringMessages.length > 0
++                ? _pendingSteeringMessages.splice(0)
++                : (await config.getSteeringMessages?.()) || [];
+         }
+
+@@ -205,9 +223,12 @@ async function streamAssistantResponse(context, config, signal, emit, streamFn)
          if (signal?.aborted) {
              break;
          }
          const pendingSteering = (await config.getSteeringMessages?.()) || [];
          if (pendingSteering.length > 0) {
--            signal?.abort?.();
 +            _steeringInterrupt = true;
++            _pendingSteeringMessages = pendingSteering;
+             signal?.abort?.();
              break;
          }
+
+@@ -286,6 +307,15 @@ async function executeToolCallsSequential(currentContext, assistantMessage, tool
+     const finalizedCalls = [];
+     const messages = [];
+     for (const toolCall of toolCalls) {
++        const pendingSteering = (await config.getSteeringMessages?.()) || [];
++        if (pendingSteering.length > 0) {
++            _steeringInterrupt = true;
++            _pendingSteeringMessages = pendingSteering;
++            break;
++        }
+         await emit({ type: "tool_execution_start", ... });
+
+@@ -312,7 +332,7 @@ async function executeToolCallsSequential(...) {
+     return {
+         messages,
+-        terminate: shouldTerminateToolBatch(finalizedCalls),
++        terminate: shouldTerminateToolBatch(finalizedCalls) || _steeringInterrupt,
+     };
+ }
