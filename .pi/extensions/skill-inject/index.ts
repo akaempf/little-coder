@@ -56,6 +56,11 @@ const INTENT_MAP: Record<string, string[]> = {
   browse: ["BrowserNavigate", "BrowserExtract"],
   page: ["BrowserExtract"],
   click: ["BrowserClick"],
+  dynatrace: ["dynatrace_execute_dql"],
+  dql: ["dynatrace_execute_dql"],
+  cpu: ["dynatrace_execute_dql"],
+  metrics: ["dynatrace_execute_dql"],
+  observability: ["dynatrace_execute_dql"],
 };
 
 function skillsDir(): string {

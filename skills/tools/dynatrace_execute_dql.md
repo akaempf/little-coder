@@ -3,7 +3,7 @@ name: dynatrace-dql-guidance
 type: tool-guidance
 target_tool: dynatrace_execute_dql
 priority: 10
-token_cost: 300
+token_cost: 200
 user-invocable: false
 ---
 ## Dynatrace DQL Tool Guidance
