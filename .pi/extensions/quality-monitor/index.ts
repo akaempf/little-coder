@@ -10,7 +10,7 @@ import { assessResponse, buildCorrectionMessage, type ToolCall } from "./quality
 // a fresh extension instance is loaded per session via the session lifecycle.
 let previousToolCalls: ToolCall[] = [];
 let consecutiveFailures = 0;
-const MAX_CONSECUTIVE_CORRECTIONS = 2; // stop nudging after 2 failed corrections
+const MAX_CONSECUTIVE_CORRECTIONS = 1; // abort quickly — local models ignore steering
 
 export default function (pi: ExtensionAPI) {
   // Populate the known-tools set lazily by observing tool_execution events.
