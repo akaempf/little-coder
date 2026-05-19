@@ -215,6 +215,15 @@ export default function (pi: ExtensionAPI) {
     lastFailedTool = isError && typeof name === "string" ? name : null;
   });
 
+  pi.on("agent_end", async (event: any) => {
+    const msgs: any[] = event?.messages ?? [];
+    const last = msgs[msgs.length - 1];
+    if (last?.stopReason === "aborted") {
+      lastFailedTool = null;
+      recentToolCalls.length = 0;
+    }
+  });
+
   pi.on("before_agent_start", async (event, ctx) => {
     loadSkills();
     if (skills.size === 0) return;
