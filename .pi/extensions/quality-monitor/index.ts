@@ -50,12 +50,19 @@ export default function (pi: ExtensionAPI) {
       return;
     }
 
-    // Cap corrections so we don't burn turns in a correction loop
     consecutiveFailures++;
     if (consecutiveFailures > MAX_CONSECUTIVE_CORRECTIONS) {
       ctx.ui.notify(
-        `quality-monitor: ${verdict.reason} (suppressed after ${consecutiveFailures} in a row)`,
+        `quality-monitor: ${verdict.reason} (aborting after ${consecutiveFailures} in a row)`,
         "warning",
+      );
+      ctx.abort();
+      await new Promise((r) => setTimeout(r, 50));
+      pi.sendUserMessage(
+        `LOOP ABORTED after ${consecutiveFailures} repeated failures (${verdict.reason}). ` +
+        "Take a completely different approach. If the tool keeps failing, " +
+        "explain what you were trying to do and ask the user for guidance.",
+        { deliverAs: "followUp" },
       );
       return;
     }
