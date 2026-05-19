@@ -32,7 +32,8 @@
     "pi": "pi",
     "test": "vitest run",
     "test:py": "python3 -m pytest benchmarks/test_rpc_client.py -q",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "postinstall": "npx patch-package"
   },
   "dependencies": {
     "@earendil-works/pi-coding-agent": "^0.74.1",
