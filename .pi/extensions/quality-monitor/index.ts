@@ -13,11 +13,12 @@ let consecutiveFailures = 0;
 const MAX_CONSECUTIVE_CORRECTIONS = 1; // abort quickly — local models ignore steering
 
 export default function (pi: ExtensionAPI) {
-  // Reset per-turn state on each new agent turn so an abort+followUp doesn't
-  // enter the next turn already over the failure threshold.
+  // Reset failure counter on agent_end so an abort+followUp doesn't enter
+  // the next turn already over the threshold. Keep previousToolCalls so that
+  // repeated_tool_call detection still fires if the model resumes doing the
+  // same thing after an abort.
   pi.on("agent_end", async () => {
     consecutiveFailures = 0;
-    previousToolCalls = [];
   });
 
   // Populate the known-tools set lazily by observing tool_execution events.
@@ -66,9 +67,9 @@ export default function (pi: ExtensionAPI) {
       ctx.abort();
       await new Promise((r) => setTimeout(r, 50));
       pi.sendUserMessage(
-        `LOOP ABORTED after ${consecutiveFailures} repeated failures (${verdict.reason}). ` +
-        "Take a completely different approach. If the tool keeps failing, " +
-        "explain what you were trying to do and ask the user for guidance.",
+        `STOP. You are repeating the same tool call with the same arguments and getting the same result. ` +
+        `Do NOT call that tool again. Summarize what you have found so far and present your findings to the user. ` +
+        `If you have not found useful data, say so and stop.`,
         { deliverAs: "followUp" },
       );
       return;
@@ -79,9 +80,6 @@ export default function (pi: ExtensionAPI) {
       `quality-monitor: ${verdict.reason} → injecting correction`,
       "warning",
     );
-    // "steer" delivers the correction promptly to the in-flight loop. The
-    // prior "followUp" mode parked the message until the *next* user input,
-    // by which point it was no longer relevant (issue #16).
     pi.sendUserMessage(correction, { deliverAs: "steer" });
   });
 }
