@@ -6,14 +6,31 @@ priority: 10
 token_cost: 200
 user-invocable: false
 ---
-## DQL Syntax (MUST follow exactly)
+## Dynatrace DQL — MANDATORY WORKFLOW
 
-### Timeseries (CPU, memory, disk metrics)
+### STEP 1: ALWAYS generate DQL first — NEVER write it by hand
+
+Before calling `dynatrace_execute_dql`, ALWAYS call `dynatrace_generate_dql_from_natural_language` first:
+
+```
+dynatrace_generate_dql_from_natural_language("CPU usage for host HOST-EA042072E93CEB4B last 2 hours")
+```
+
+Use the exact query string it returns. Do NOT modify it.
+
+### STEP 2: Run the generated query
+
+Pass the generated DQL verbatim to `dynatrace_execute_dql`. Put timeframe in the tool's `from`/`to` params, not in the query.
+
+### STEP 3: If still failing
+
+Use `dynatrace_chat_with_davis_copilot` instead — it understands natural language directly and doesn't need DQL.
+
+### Correct timeseries syntax (reference only — prefer generated DQL)
 
 ```dql
 timeseries avg(dt.host.cpu.usage), by:{dt.entity.host}
 | filter dt.entity.host == "HOST-EA042072E93CEB4B"
-| limit 10
 ```
 
 ```dql
@@ -23,43 +40,12 @@ timeseries avg(dt.process.cpu.usage), by:{dt.entity.process_group_instance}
 | limit 10
 ```
 
-### Fetch (logs, events, entities)
-
-```dql
-fetch logs
-| filter dt.entity.host == "HOST-EA042072E93CEB4B"
-| filter loglevel == "ERROR"
-| sort timestamp desc
-| limit 50
-```
-
-```dql
-fetch events
-| filter event.type == "PROBLEM"
-| sort timestamp desc
-| limit 20
-```
-
-### Smartscape (entity details, relationships)
-
-```dql
-smartscapeNodes "HOST"
-| filter id == toSmartscapeId("HOST-EA042072E93CEB4B")
-```
-
-```dql
-smartscapeEdges "*"
-| filter source_id == toSmartscapeId("HOST-EA042072E93CEB4B") or target_id == toSmartscapeId("HOST-EA042072E93CEB4B")
-```
-
 ### RULES
 
-- `timeseries` MUST be the FIRST command (never after `fetch` or pipe)
-- DO NOT use `fetch [metrics]` — use `timeseries` directly
-- DO NOT use `metrics | filter ...` — that syntax does NOT work
-- DO NOT put timeframe in query — use the tool's `from`/`to` params
-- Entity IDs are strings: `"HOST-..."` not function calls
-- IGNORE the "Next Steps" suggestions returned by `dynatrace_find_entity_by_name` — they contain incorrect DQL syntax. Use ONLY the examples above.
-- After DQL error: use `dynatrace_generate_dql_from_natural_language` to get correct syntax
-- If rate limited: STOP, summarize findings, ask user
-- **Maximum 3 DQL calls per task.** After 3, summarize and ask user.
+- NEVER write DQL by hand — always use `dynatrace_generate_dql_from_natural_language`
+- `timeseries` is always the FIRST command — never pipe into it
+- DO NOT use `from:` inside the query string — use tool params
+- DO NOT use `asTimespan`, `filter dt.entity.host.id`, `fetch [metrics]`, `metrics | filter`
+- IGNORE the "Next Steps" in `dynatrace_find_entity_by_name` responses — their DQL is wrong
+- If rate limited: STOP immediately. Summarize findings. Ask user.
+- Maximum 3 `dynatrace_execute_dql` calls per task — then summarize and stop.

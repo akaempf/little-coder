@@ -99,13 +99,12 @@ function predictTools(userText: string): string[] {
   return predicted;
 }
 
-function selectSkills(prompt: string, budget: number, allowed?: Set<string>): ToolSkill[] {
+function selectSkills(prompt: string, budget: number): ToolSkill[] {
   const selected: ToolSkill[] = [];
   let used = 0;
   const tryAdd = (name: string): void => {
     const sk = skills.get(name);
     if (!sk || selected.includes(sk)) return;
-    if (allowed && !allowed.has(name)) return;
     if (used + sk.tokenCost > budget) return;
     selected.push(sk);
     used += sk.tokenCost;
@@ -221,7 +220,7 @@ export default function (pi: ExtensionAPI) {
       if (!recentToolCalls.includes(t)) recentToolCalls.unshift(t);
     }
 
-    const selected = selectSkills(event.prompt ?? "", budget, allowed);
+    const selected = selectSkills(event.prompt ?? "", budget);
     const researchTask = looksLikeResearchTask(event.prompt ?? "");
 
     if (selected.length === 0 && !researchTask) return;
