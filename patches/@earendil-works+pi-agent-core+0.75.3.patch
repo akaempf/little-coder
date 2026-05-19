@@ -1,16 +1,29 @@
 diff --git a/node_modules/@earendil-works/pi-agent-core/dist/agent-loop.js b/node_modules/@earendil-works/pi-agent-core/dist/agent-loop.js
-index 9899c13..a214296 100644
 --- a/node_modules/@earendil-works/pi-agent-core/dist/agent-loop.js
 +++ b/node_modules/@earendil-works/pi-agent-core/dist/agent-loop.js
-@@ -194,6 +194,16 @@ async function streamAssistantResponse(context, config, signal, emit, streamFn)
+@@ -107,8 +107,17 @@ async function runLoop(initialContext, newMessages, initialConfig, signal, emit,
+             if (message.stopReason === "error" || message.stopReason === "aborted") {
+                 await emit({ type: "turn_end", message, toolResults: [] });
+-                await emit({ type: "agent_end", messages: newMessages });
+-                return;
++                if (message.stopReason === "aborted") {
++                    const steeringOnAbort = (await config.getSteeringMessages?.()) || [];
++                    if (steeringOnAbort.length > 0) {
++                        pendingMessages = steeringOnAbort;
++                        firstTurn = false;
++                        continue;
++                    }
++                }
++                await emit({ type: "agent_end", messages: newMessages });
++                return;
+             }
+@@ -194,6 +203,14 @@ async function streamAssistantResponse(context, config, signal, emit, streamFn)
      let partialMessage = null;
      let addedPartial = false;
      for await (const event of response) {
-+        // Check for abort signal during streaming
 +        if (signal?.aborted) {
 +            break;
 +        }
-+        // Check for pending steering messages (user typed while agent was running).
 +        const pendingSteering = (await config.getSteeringMessages?.()) || [];
 +        if (pendingSteering.length > 0) {
 +            signal?.abort?.();
@@ -18,4 +31,3 @@ index 9899c13..a214296 100644
 +        }
          switch (event.type) {
              case "start":
-                 partialMessage = event.partial;
