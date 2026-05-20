@@ -83,7 +83,7 @@
       "env": {
         "DT_ENVIRONMENT": "https://jop65683.apps.dynatrace.com"
       },
-      "description": "Dynatrace observability — problems, DQL queries, Davis AI",
+      "description": "Dynatrace observability \u2014 problems, DQL queries, Davis AI",
       "triggerKeywords": [
         "dynatrace",
         "davis ai",
@@ -100,10 +100,10 @@
         "find_entity_by_name",
         "list_vulnerabilities",
         "list_exceptions",
-        "generate_dql_from_natural_language",
-        "chat_with_davis_copilot"
+        "generate_dql_from_natural_language"
       ],
-      "autoActivate": false
+      "autoActivate": false,
+      "keepAlive": true
     }
   }
 }
