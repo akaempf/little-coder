@@ -1,50 +1,42 @@
 diff --git a/node_modules/@earendil-works/pi-agent-core/dist/agent-loop.js b/node_modules/@earendil-works/pi-agent-core/dist/agent-loop.js
-index 9899c13..b825241 100644
+index 9899c13..4cacbaa 100644
 --- a/node_modules/@earendil-works/pi-agent-core/dist/agent-loop.js
 +++ b/node_modules/@earendil-works/pi-agent-core/dist/agent-loop.js
-@@ -3,6 +3,16 @@
+@@ -3,6 +3,9 @@
   * Transforms to Message[] only at the LLM call boundary.
   */
  import { EventStream, streamSimple, validateToolArguments, } from "@earendil-works/pi-ai";
-+import { appendFileSync } from "fs";
-+import { homedir } from "os";
-+const _steerLog = homedir() + "/.pi/steer-debug.log";
-+function _slog(msg) {
-+    const line = `[${new Date().toISOString()}] ${msg}\n`;
-+    process.stderr.write("[steer] " + msg + "\n");
-+    try { appendFileSync(_steerLog, line); } catch(_) {}
-+}
++
 +let _steeringInterrupt = false;
 +let _pendingSteeringMessages = [];
  /**
   * Start an agent loop with a new prompt message.
   * The prompt is added to the context and events are emitted for it.
-@@ -80,6 +90,9 @@ async function runLoop(initialContext, newMessages, initialConfig, signal, emit,
+@@ -80,6 +83,9 @@ async function runLoop(initialContext, newMessages, initialConfig, signal, emit,
      let firstTurn = true;
      // Check for steering messages at start (user may have typed while waiting)
      let pendingMessages = (await config.getSteeringMessages?.()) || [];
-+    if (pendingMessages.length > 0) _slog(`runLoop start: ${pendingMessages.length} pending steer msg(s)`);
++
 +    _steeringInterrupt = false;
 +    _pendingSteeringMessages = [];
      // Outer loop: continues when queued follow-up messages arrive after agent would stop
      while (true) {
          let hasMoreToolCalls = true;
-@@ -93,6 +106,7 @@ async function runLoop(initialContext, newMessages, initialConfig, signal, emit,
+@@ -93,6 +99,7 @@ async function runLoop(initialContext, newMessages, initialConfig, signal, emit,
              }
              // Process pending messages (inject before next assistant response)
              if (pendingMessages.length > 0) {
-+                _slog(`injecting ${pendingMessages.length} pending message(s) into context`);
++                
                  for (const message of pendingMessages) {
                      await emit({ type: "message_start", message });
                      await emit({ type: "message_end", message });
-@@ -104,8 +118,29 @@ async function runLoop(initialContext, newMessages, initialConfig, signal, emit,
+@@ -104,8 +111,28 @@ async function runLoop(initialContext, newMessages, initialConfig, signal, emit,
              // Stream assistant response
              const message = await streamAssistantResponse(currentContext, config, signal, emit, streamFn);
              newMessages.push(message);
 -            if (message.stopReason === "error" || message.stopReason === "aborted") {
 +            if (message.stopReason === "error" || message.stopReason === "aborted" || _steeringInterrupt) {
                  await emit({ type: "turn_end", message, toolResults: [] });
-+                _slog(`stopReason=${message.stopReason} _steeringInterrupt=${_steeringInterrupt} errorMessage=${message.errorMessage ?? "none"}`);
 +                if (_steeringInterrupt) {
 +                    _steeringInterrupt = false;
 +                    const steeringOnAbort = _pendingSteeringMessages.length > 0
@@ -68,7 +60,7 @@ index 9899c13..b825241 100644
                  await emit({ type: "agent_end", messages: newMessages });
                  return;
              }
-@@ -142,6 +177,14 @@ async function runLoop(initialContext, newMessages, initialConfig, signal, emit,
+@@ -142,6 +169,13 @@ async function runLoop(initialContext, newMessages, initialConfig, signal, emit,
                              : nextTurnSnapshot.thinkingLevel,
                  };
              }
@@ -77,13 +69,12 @@ index 9899c13..b825241 100644
 +                ? _pendingSteeringMessages.splice(0)
 +                : (await config.getSteeringMessages?.()) || [];
 +            if (pendingMessages.length > 0) {
-+                _slog(`end-of-turn: picked up ${pendingMessages.length} steering msg(s), skipping shouldStopAfterTurn`);
 +                continue;
 +            }
              if (await config.shouldStopAfterTurn?.({
                  message,
                  toolResults,
-@@ -151,7 +194,6 @@ async function runLoop(initialContext, newMessages, initialConfig, signal, emit,
+@@ -151,7 +185,6 @@ async function runLoop(initialContext, newMessages, initialConfig, signal, emit,
                  await emit({ type: "agent_end", messages: newMessages });
                  return;
              }
@@ -91,7 +82,7 @@ index 9899c13..b825241 100644
          }
          // Agent would stop here. Check for follow-up messages.
          const followUpMessages = (await config.getFollowUpMessages?.()) || [];
-@@ -185,15 +227,34 @@ async function streamAssistantResponse(context, config, signal, emit, streamFn)
+@@ -185,15 +218,33 @@ async function streamAssistantResponse(context, config, signal, emit, streamFn)
      };
      const streamFunction = streamFn || streamSimple;
      // Resolve API key (important for expiring tokens)
@@ -118,7 +109,6 @@ index 9899c13..b825241 100644
 +        if (!hasActiveTool) {
 +            const pendingSteering = (await config.getSteeringMessages?.()) || [];
 +            if (pendingSteering.length > 0) {
-+                _slog(`detected steering mid-stream, aborting: "${pendingSteering[0]?.content?.[0]?.text?.slice(0,50) ?? "?"}"`)
 +                _steeringInterrupt = true;
 +                _pendingSteeringMessages = pendingSteering;
 +                steerController.abort();
@@ -128,13 +118,12 @@ index 9899c13..b825241 100644
          switch (event.type) {
              case "start":
                  partialMessage = event.partial;
-@@ -237,6 +298,22 @@ async function streamAssistantResponse(context, config, signal, emit, streamFn)
+@@ -237,6 +288,21 @@ async function streamAssistantResponse(context, config, signal, emit, streamFn)
              }
          }
      }
 +    } catch (err) {
 +        if (_steeringInterrupt || steerController.signal.aborted) {
-+            _slog(`stream aborted via exception`);
 +        } else {
 +            throw err;
 +        }
@@ -151,7 +140,7 @@ index 9899c13..b825241 100644
      const finalMessage = await response.result();
      if (addedPartial) {
          context.messages[context.messages.length - 1] = finalMessage;
-@@ -263,6 +340,12 @@ async function executeToolCallsSequential(currentContext, assistantMessage, tool
+@@ -263,6 +329,12 @@ async function executeToolCallsSequential(currentContext, assistantMessage, tool
      const finalizedCalls = [];
      const messages = [];
      for (const toolCall of toolCalls) {
@@ -164,7 +153,7 @@ index 9899c13..b825241 100644
          await emit({
              type: "tool_execution_start",
              toolCallId: toolCall.id,
-@@ -290,7 +373,7 @@ async function executeToolCallsSequential(currentContext, assistantMessage, tool
+@@ -290,7 +362,7 @@ async function executeToolCallsSequential(currentContext, assistantMessage, tool
      }
      return {
          messages,
@@ -173,17 +162,3 @@ index 9899c13..b825241 100644
      };
  }
  async function executeToolCallsParallel(currentContext, assistantMessage, toolCalls, config, signal, emit) {
-diff --git a/node_modules/@earendil-works/pi-agent-core/dist/agent.js b/node_modules/@earendil-works/pi-agent-core/dist/agent.js
-index fb7641e..4413db9 100644
---- a/node_modules/@earendil-works/pi-agent-core/dist/agent.js
-+++ b/node_modules/@earendil-works/pi-agent-core/dist/agent.js
-@@ -165,6 +165,9 @@ export class Agent {
-     }
-     /** Queue a message to be injected after the current assistant turn finishes. */
-     steer(message) {
-+        const text = message?.content?.[0]?.text?.slice(0, 50) ?? "?";
-+        process.stderr.write(`[steer-enqueue] queued: "${text}" queueSize=${this.steeringQueue.messages.length + 1}\n`);
-+        try { const { appendFileSync } = require("fs"); const { homedir } = require("os"); appendFileSync(homedir() + "/.pi/steer-debug.log", `[${new Date().toISOString()}] steer-enqueue: "${text}"\n`); } catch(_) {}
-         this.steeringQueue.enqueue(message);
-     }
-     /** Queue a message to run only after the agent would otherwise stop. */

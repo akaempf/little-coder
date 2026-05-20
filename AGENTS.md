@@ -37,6 +37,16 @@ Manual: `mcp_activate("name")` / `mcp_deactivate("name")`.
 
 Servers: jira, confluence, github, dynatrace, filesystem, sqz, context7.
 
+### Dynatrace
+
+Available tools: `execute_dql`, `list_problems`, `find_entity_by_name`, `list_vulnerabilities`, `list_exceptions`, `generate_dql_from_natural_language`.
+
+**When unsure about DQL syntax**: Use `generate_dql_from_natural_language` — describe what you want in plain English and it returns the correct DQL. Always prefer this over guessing DQL syntax.
+
+**DQL workflow**: If you need to query Dynatrace data but don't know the exact DQL:
+1. Call `generate_dql_from_natural_language` with your question
+2. Use the returned DQL in `execute_dql`
+
 ### Local vs Remote
 
 For local git operations (status, log, diff, commit, push), ALWAYS use `bash` with `git` commands. MCP tools like `github_search_repositories` are for GitHub API operations only (searching remote repos, creating PRs/issues). Never use the GitHub MCP to check local repo status.
@@ -83,6 +93,24 @@ Your system prompt is assembled per turn by little-coder's extension stack:
 - **Algorithm cheat sheets** (`## Algorithm Reference`): scored against the problem statement by keyword + bigram matching.
 
 When you see these blocks, trust them — they were selected for the current turn.
+
+# Reasoning
+
+Before acting on any non-trivial task:
+1. **Restate the goal** in one sentence. If you can't, ask.
+2. **Identify the hardest part** — the step most likely to go wrong.
+3. **List what you know vs. what you need to verify** before writing code or running commands.
+4. **Choose the minimal path** — fewest steps, fewest file reads, fewest tool calls that get to a correct result.
+
+When you produce output (code, commands, answers):
+- **Check it against the goal** before returning. Does it actually solve what was asked?
+- **State what you're uncertain about.** Do not fabricate file paths, API shapes, or behavior you haven't verified.
+- **If a tool call fails**, diagnose the cause before retrying. Never retry the same call unchanged.
+
+For code specifically:
+- Trace the data flow mentally: what goes in, what comes out, where it can break.
+- Identify edge cases that would silently produce wrong results (off-by-one, empty input, wrong type).
+- Prefer one correct implementation over multiple attempts.
 
 # Guidelines
 
