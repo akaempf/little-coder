@@ -1,4 +1,4 @@
-import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -10,6 +10,13 @@ import { fileURLToPath } from "node:url";
 // the resolved values on event.systemPromptOptions.littleCoder so the
 // other extensions (skill-inject, knowledge-inject, thinking-budget,
 // turn-cap) read them from a single source of truth.
+//
+// Context budget: `contextLimit` is NOT a hardcoded settings value — it
+// follows the model's live registered window (ctx.model.contextWindow, the
+// same window pi shows and read-guard/getContextUsage use), so bumping a
+// model's contextWindow in models.json propagates everywhere. An explicit
+// per-profile/benchmark `context_limit` (e.g. gaia) still wins, and
+// CONTEXT_FALLBACK (32768) is the last resort when no window is known.
 
 interface ModelProfile {
   context_limit?: number;
@@ -60,30 +67,70 @@ function loadSettings(): void {
   }
 }
 
-function resolveProfile(providerSlashModel: string): ModelProfile {
-  loadSettings();
-  if (!settings) return {};
-  const profiles = settings.model_profiles ?? {};
-  const bench = process.env.LITTLE_CODER_BENCHMARK;
+// Normalize the separator between model-name segments so a profile key written
+// with hyphens (`llamacpp/qwen3.6-35b-a3b`) matches a runtime model id that uses
+// a colon (`llamacpp/qwen3.6:35b-a3b`) and vice-versa. Without this the prefix
+// match silently fails and EVERY model falls back to default_model_profile —
+// per-model thinking_budget / context_limit / temperature are skipped (the
+// quirk surfaced in issue #8's reproduction). Dots (`qwen3.6`) are preserved.
+export function normKey(s: string): string {
+  return s.replace(/:/g, "-");
+}
 
-  // Exact match first, then prefix match (mirrors get_model_profile)
+// Pure resolver, exported for testing. Exact match → separator-insensitive
+// prefix match → default_model_profile, then benchmark_overrides if `bench` set.
+export function resolveProfileFrom(
+  s: LittleCoderSettings | null,
+  providerSlashModel: string,
+  bench?: string,
+): ModelProfile {
+  if (!s) return {};
+  const profiles = s.model_profiles ?? {};
+  const target = normKey(providerSlashModel);
+
   let base: ModelProfile | undefined = profiles[providerSlashModel];
   if (!base) {
     for (const [pattern, p] of Object.entries(profiles)) {
-      if (providerSlashModel.startsWith(pattern)) {
+      if (target === normKey(pattern) || target.startsWith(normKey(pattern))) {
         base = p;
         break;
       }
     }
   }
-  if (!base) base = settings.default_model_profile ?? {};
+  if (!base) base = s.default_model_profile ?? {};
 
-  // Strip + apply benchmark_overrides if set
   const { benchmark_overrides, ...basePlain } = { ...base };
   if (bench && benchmark_overrides && benchmark_overrides[bench]) {
     return { ...basePlain, ...benchmark_overrides[bench] };
   }
   return basePlain;
+}
+
+// Last-resort context window when neither an explicit profile override nor the
+// model's registered window is available (also the shipped models.json default).
+export const CONTEXT_FALLBACK = 32768;
+
+// little-coder's context budget follows the model's live registered window.
+// Precedence: an explicit profile/benchmark context_limit (e.g. gaia) wins, then
+// the model's registered contextWindow (provider-defined, user-overridable in
+// models.json), then CONTEXT_FALLBACK. A non-positive / non-finite window is
+// treated as "unknown" and falls through.
+export function resolveContextLimit(
+  profileContextLimit?: number,
+  modelWindow?: number,
+): number {
+  if (typeof profileContextLimit === "number" && profileContextLimit > 0) {
+    return profileContextLimit;
+  }
+  if (typeof modelWindow === "number" && Number.isFinite(modelWindow) && modelWindow > 0) {
+    return modelWindow;
+  }
+  return CONTEXT_FALLBACK;
+}
+
+function resolveProfile(providerSlashModel: string): ModelProfile {
+  loadSettings();
+  return resolveProfileFrom(settings, providerSlashModel, process.env.LITTLE_CODER_BENCHMARK);
 }
 
 // Per-benchmark tools that should always have skill cards present on turn 1,
@@ -138,6 +185,12 @@ export default function (pi: ExtensionAPI) {
     for (const [k, v] of Object.entries(resolved)) {
       if (opts.littleCoder[k] === undefined) opts.littleCoder[k] = v;
     }
+
+    // Context budget follows the model's live registered window (the same
+    // window pi displays and read-guard reads), not a hardcoded settings value.
+    // An explicit profile/benchmark context_limit still wins; 32k is the floor.
+    const modelWindow = Number((model as any)?.contextWindow);
+    opts.littleCoder.contextLimit = resolveContextLimit(profile.context_limit, modelWindow);
 
     resolvedTemperature = opts.littleCoder.temperature;
   });

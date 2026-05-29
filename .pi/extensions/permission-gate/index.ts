@@ -1,4 +1,4 @@
-import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
 // Port of tools.py::_SAFE_PREFIXES + agent.py::_check_permission. Bash
 // commands not matching the whitelist are blocked in "auto" mode. In
@@ -16,7 +16,7 @@ const BUILTIN_SAFE_PREFIXES: readonly string[] = [
   "which", "type", "env", "printenv", "uname", "whoami", "id",
   "git log", "git status", "git diff", "git show", "git branch",
   "git remote", "git stash list", "git tag",
-  "find ", "grep ", "rg ", "ag ", "fd ",
+  "find ", "grep ", "rg ", "ag ", "fd ", "sed ",
   "python ", "python3 ", "node ", "ruby ", "perl ",
   "pip show", "pip list", "npm list", "cargo metadata",
   "df ", "du ", "free ", "top -bn", "ps ",

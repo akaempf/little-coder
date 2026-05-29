@@ -2,6 +2,140 @@
 
 All notable changes to little-coder are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and little-coder's public interface (CLI, providers, tools, skills) follows semver starting at `v0.0.1` post-rename.
 
+## [v1.8.1] — 2026-05-23
+
+### Fixed
+- **`glob` no longer exhausts memory on a recursive search from a huge root.** The tool capped *matches* at 500 but never bounded the *walk*: run from a home directory (or any tree with macOS `Library`, caches, or `node_modules`), `fs.glob` recursively descended everything and its internal traversal state grew until the Node **process** ran out of heap — a host-memory crash (`Ineffective mark-compacts near heap limit`), entirely distinct from the model's *context window* (the read-guard / window machinery operates on tool *results* in tokens; this died mid-walk, before any result existed). The walk is now bounded two ways: heavy/irrelevant directories (`node_modules`, `.git`, `dist`, `.cache`, `Library`, `venv`, `target`, …) are **pruned** — never descended — and a hard scan budget (200 000 entries) halts the walk through the one hook `fs.glob` calls per entry (`exclude`), since it exposes no signal/abort. When results are cut short the output says so, so the model narrows its search. New unit-tested `globFiles` / `renderGlobOutcome` helpers (`.pi/extensions/extra-tools/glob.ts`), verified to prune `node_modules` (0 descent) and to halt at the scan budget.
+
+### Notes for upgraders
+- For a focused search, pass a `path` (a project subdirectory) instead of globbing from a home directory. Hidden directories continue to be skipped by `fs.glob` as before.
+
+---
+
+## [v1.8.0] — 2026-05-23
+
+little-coder now **auto-detects the llama.cpp server's live context window** at startup and registers the model with it, so a `llama-server -c 131072` shows 128k instead of the declared default — no config edit. This completes [v1.7.0](#v170--2026-05-23): the budget already *followed* the registered window; now the registered window itself comes from the running server.
+
+### Added
+- **Live context-window detection for llama.cpp.** On startup `llama-cpp-provider` GETs the server's `/props` endpoint, reads its actual `n_ctx`, and registers the model with that window in place of the static `contextWindow` in `models.json`. The TUI context readout, read-guard's overflow trim, and the skill/knowledge budgets all then track the server's real window — bump `llama-server -c` and little-coder follows, no `models.json` or settings edit. The `/props` URL is derived from the provider baseUrl by stripping `/v1` (llama-server serves it at the root); the value is read from `default_generation_settings.n_ctx`. New tested helpers `propsUrlFor` / `contextWindowFromProps` / `probeContextWindow`, validated end-to-end against a live `-c 131072` server (→ 131072).
+  - **Best-effort and safe:** 1.5 s timeout, `llamacpp` provider only, and ANY failure (server down, no `/props`, non-JSON, timeout) silently falls back to the declared window — startup is never blocked or broken.
+  - **Env knobs:** `LITTLE_CODER_NO_CTX_PROBE=1` disables the probe (offline / CI); `LITTLE_CODER_LLAMACPP_PROPS_URL` overrides the `/props` URL for non-standard setups; `LITTLE_CODER_CTX_PROBE_TIMEOUT_MS` tunes the timeout.
+
+### Notes for upgraders
+- This adds one best-effort HTTP GET to the llama.cpp `/props` endpoint at launch (only for the `llamacpp` provider). If your server/proxy doesn't expose `/props`, behaviour is unchanged — the declared `models.json` `contextWindow` (default 32768) is used. Set `LITTLE_CODER_NO_CTX_PROBE=1` to skip the probe entirely.
+- No CLI-flag or public-API changes.
+
+---
+
+## [v1.7.0] — 2026-05-23
+
+little-coder's context budget now follows the model's **live registered context window** instead of a hardcoded 32 768. Whatever window your provider declares for the active model (`contextWindow` in `models.json`, user-overridable) is what the whole harness budgets against — bump the model once and the TUI's context readout, read-guard's overflow trim, and the skill/knowledge-injection budgets all move together. This closes the common report: *"I bumped llama.cpp to 128k but little-coder still says 33k."*
+
+### Changed
+- **`context_limit` is no longer a hardcoded per-profile setting.** It's removed from `default_model_profile` and every base per-model profile in `.pi/settings.json`. `benchmark-profiles` now resolves the published `littleCoder.contextLimit` from the active model's `ctx.model.contextWindow` — the same registered window pi displays and `getContextUsage()` / `read-guard` already use. Precedence: an explicit per-profile/benchmark `context_limit` override → the model's registered window → `CONTEXT_FALLBACK` (32 768). New exported, tested `resolveContextLimit()`, plus an end-to-end test that fires `before_agent_start` against the real `settings.json`.
+  - Practical effect: to run at 128k, set `contextWindow: 131072` for the model in your `models.json` (or a `~/.config/little-coder/models.json` override). There's no second knob — every budget follows it. Previously you also had to edit the now-removed `context_limit`, and the budgeting extensions silently stayed at 32 768 even after you bumped the server.
+
+### Notes for upgraders
+- Behaviour is unchanged if your `models.json` declares `contextWindow: 32768` (the shipped default) — the resolved budget is still 32 768. Only models with a larger declared window see a change.
+- The **gaia** benchmark override keeps its explicit `context_limit: 65536` (an explicit override still wins). Real interactive usage was never turn- or context-capped and still isn't.
+- No CLI-flag or public-API changes. `littleCoder.contextLimit` is published under the same name; only its source moved from settings to the live model window.
+
+---
+
+## [v1.6.1] — 2026-05-23
+
+A one-line whitelist tweak: `sed` is now an allowed bash command in `auto` permission mode. Stream-editing and line-range printing (`sed -n '1,20p' file`) are routine enough that gating them behind a per-deployment `LITTLE_CODER_BASH_ALLOW` was friction without a safety payoff — `sed` sits naturally alongside the already-allowed text-search tools (`grep`, `rg`, `find`).
+
+### Changed
+- **`sed ` added to the built-in `SAFE_PREFIXES`** (`.pi/extensions/permission-gate/index.ts`). As with every prefix on that list, the trailing space is a word boundary, so `sed …` is allowed while `sedfoo` is not. Note this also permits in-place edits (`sed -i`), the same read-write trade-off the list already makes for `cp `/`mv `; `rm` still stays off the list by design.
+
+### Notes for upgraders
+- Purely additive. No CLI flag, `models.json`, `.pi/settings.json`, or per-model-profile schema changes. If a deployment had been allowing `sed` via `LITTLE_CODER_BASH_ALLOW`, that entry is now redundant (harmless — the lists are merged).
+
+---
+
+## [v1.6.0] — 2026-05-23
+
+A new harness intervention for small-context models: oversized file reads no longer blow the context window. little-coder targets local models with small windows (`context_limit` is 32768, and the live window is often less), but pi's built-in `read` returns up to ~2000 lines in a single tool result — enough for one read to evict the conversation and derail the run. The harness now catches that read before it lands and replaces it with the file's head plus a "search, don't slurp" directive, surfaced through the same one-voice `harness intervention: …` line as the thinking-budget cap, write-guard redirect, and turn-cap.
+
+### Added
+- **`read-guard` extension — trims a Read that would overflow the context window.** On the `tool_result` event, when a successful `read`'s content would push context usage past the window (`ctx.getContextUsage().tokens + estimate(result) > contextWindow`, estimated at the same 3.5 chars/token ratio as the thinking-budget cap), the harness replaces the result with **only the file's first 30 lines** followed by a message that explains the trim and directs the model to use those lines to understand the file's structure, then narrow down — locate what it needs with `grep`/`find` or a targeted `read` (`offset`/`limit`) — rather than re-reading the whole file. The full file is still read from disk (pi already caps that at ~2000 lines), but the oversized text never reaches the model's context because the result content is swapped before it lands. `tool_result` (not `tool_call`) is used precisely because it can deliver both the 30 lines and the explanation in one result — a `tool_call` block can only return a `reason` string, and mutating `input.limit` gives lines but no message. When current usage is unknown (e.g. right after compaction, `tokens` is null), it falls back to trimming any single read that alone exceeds half the window. Image reads and error results are left untouched. New extension at `.pi/extensions/read-guard/`, auto-discovered by the launcher.
+
+### Notes for upgraders
+- No CLI flag, `models.json` shape, `.pi/settings.json`, or per-model-profile schema changes. The new extension auto-loads like every other `.pi/extensions/*/index.ts`, and only changes behaviour when a read would otherwise overflow the context window — normal reads pass through untouched. The threshold reads pi's live `getContextUsage()`, so it scales with whatever context window the active model reports.
+
+---
+
+## [v1.5.1] — 2026-05-22
+
+A branding release — no behaviour changes. little-coder now wears the v1.0 brand book: the warm **paper / ink / honey** palette (`#F2EBDC` · `#1A1410` · `#E15A1F`), the `lc▌` block-cursor mark, and IBM Plex Mono. The "ready to type" cursor is the punchline — it ties the CLI heritage into the identity without saying so.
+
+### Changed
+- **README hero is now the brand-book terminal banner.** A single self-contained SVG (`assets/banner.svg`, recreating the brand book's "github readme · hero" slide) replaces the old startup screenshot: ink terminal card, `lc▌` monogram in honey, the wordmark + tagline, and the verifiable headline numbers (`qwen3.6-35b-a3b`, terminal-bench 2.0 24.6%, aider polyglot 45.56%). IBM Plex Mono is embedded so it renders in-face on GitHub, with a `ui-monospace` fallback.
+- **TUI header adopts the honey "prompt lockup."** The interactive startup header (`.pi/extensions/branding/index.ts`) now renders `> little-coder▌` with a honey prompt caret and block cursor — the brand's variant for terminals and dark surfaces. Honey is emitted as a 24-bit truecolor SGR so it matches `#E15A1F` exactly regardless of the active pi theme.
+
+### Removed
+- The stale purple (`#7c3aed`) `docs/assets/startup.svg` mockup (`v0.0.1` / `ollama/qwen3.5`), now superseded by the on-brand banner.
+
+---
+
+## [v1.5.0] — 2026-05-22
+
+A reliability + UX release centered on the harness's intervention machinery. Issue [#8](https://github.com/itayinbarr/little-coder/issues/8) reproduced on 1.4.3 through a *new* mechanism, and chasing it down fixed a cluster of related symptoms: thinking never actually turning off after a budget breach, a spurious "empty response" nag after interrupts, and a noisy stack of warnings around every harness decision. Harness interventions now speak with one voice, and the thinking-budget cap is more generous.
+
+### Fixed
+- **Thinking-budget recovery no longer dies on a stale `pi` ([#8](https://github.com/itayinbarr/little-coder/issues/8), second reproduction).** The v1.0.0 fix deferred recovery (`setThinkingLevel("off")` + the commit-to-an-implementation follow-up) to a `turn_end` handler that ran, after a `setImmediate` yield, against the module-scope `pi` (`ExtensionAPI`). But the over-budget `ctx.abort()` makes pi's `agent_end` run auto-retry / auto-compaction (both enabled in `.pi/settings.json`; `agent-session.js:761` "compact before sending — catches aborted responses"), which **replaces the session** — `dispose()` → `ExtensionRunner.invalidate()` (`agent-session.js:516`) marks the captured `pi` stale. The `setImmediate` yield was exactly what let that replacement land *before* the deferred recovery, so the recovery touched a stale `pi` and threw (`"This extension ctx is stale after session replacement or reload"`). Net effect: thinking was never disabled (so the *next* step kept thinking) and the follow-up never reached the model (so the agent appeared to stop). The fix does the entire recovery **synchronously inside `message_update`, before `ctx.abort()`**, while `pi` is still live — no deferred handler, no `setImmediate`, nothing that can run against a stale reference. Thanks to the reporter on #8 for the minimal repro and the stale-`ctx` diagnosis.
+- **Thinking stays off across the forced restart turn.** Even with recovery firing, the post-abort run could re-resolve the thinking level back to the profile default. A `forcedOff` latch now re-asserts `"off"` at the start of every turn from a budget breach until your *next* genuine prompt (the `input` event), at which point the level you actually had is restored — so a new task thinks normally and we don't leave thinking globally disabled. State is also cleared on `session_start` (a new session / `/clear` is a clean slate).
+- **No more spurious "your previous response was empty" after an interrupt.** `quality-monitor` assessed *every* `turn_end`, including turns the user interrupted with ESC or that the harness aborted (thinking-budget, turn-cap) — which carry partial/empty content and `stopReason: "aborted"`. It then steered an `empty_response` correction onto your *next* prompt. It now skips `stopReason: "aborted"` turns entirely; genuinely-empty *completed* turns are still flagged.
+- **Per-model profiles are no longer silently skipped on colon-style model ids.** `benchmark-profiles` prefix-matched model keys literally, so a hyphenated profile key (`llamacpp/qwen3.6-35b-a3b`) never matched a runtime id using a colon (`llamacpp/qwen3.6:35b-a3b`) and every such model fell back to `default_model_profile`. Matching is now separator-insensitive (`:` ≡ `-`).
+- **Existing files can no longer be silently overwritten via Write.** pi ships a built-in `write` tool that overwrites existing files (`core/tools/write.js`) and shadowed little-coder's custom guarded `write`, so the whole-file-rewrite guard the benchmark results depend on had stopped firing. The guard now runs on the `tool_call` event — it catches whichever `write` implementation executes, normalizes the path in place, and blocks writes to existing files with a corrected Edit recipe (pi's `edit` takes `edits: [{oldText, newText}]`, not `old_string`/`new_string`).
+
+### Added
+- **`/clear` command.** Starts a fresh session as if little-coder were closed and relaunched — re-renders the banner, rebuilds the AGENTS.md/system-prompt context, and resets session-scoped extension state — via `ctx.newSession()`. (pi's built-in equivalent is `/new`; `/clear` is the alias muscle-memory expects.)
+- **One-line "harness intervention" UX.** Every moment the scaffolding overrides or redirects the model — thinking-budget cap, write-guard redirect, turn-cap, finalize-warn, quality-monitor corrections, output-parser nudges — now surfaces a single, uniformly-worded line (`harness intervention: …`) instead of each extension's own ad-hoc warning. Helper at `.pi/extensions/_shared/intervention.ts`.
+- **pi's bare "Operation aborted" marker is suppressed.** With harness interventions carrying their own line and a user ESC being self-evident, the stacked red marker was noise. pi is a normal dependency (not vendored), so this ships as an idempotent, dependency-free source patch (`scripts/patch-pi.mjs`) applied on `postinstall` **and** re-applied on every launch by the launcher — it self-heals if install scripts were skipped or pi was reinstalled, and **fails safe**: if a future pi changes that code the patch silently no-ops (you'd just see the marker again) rather than breaking install or launch. A test (`scripts/patch-pi.test.mjs`) fails loudly the moment the installed pi no longer matches, so a pi bump is a caught CI signal to refresh one string — never a silent regression.
+
+### Changed
+- **Thinking-budget cap raised 2048 → 4096 tokens** across `default_model_profile` and every per-model profile (the `terminal_bench` / `gaia` benchmark overrides keep their tuned values). The hardcoded fallback in the `thinking-budget` extension matches.
+
+### Notes for upgraders
+- No CLI flag, `models.json` shape, or per-model-profile *schema* changes. The only `.pi/settings.json` value change is `thinking_budget` (2048 → 4096); if you'd pinned it lower on purpose, re-set it in your own settings.
+- The custom `write` tool the `write-guard` extension used to register is gone — writes go through pi's built-in `write`, guarded at the `tool_call` event. If you depended on the old tool's `file_path` arg name in a fork, note pi's built-in uses `path` (both are accepted by the guard).
+- The pi source patch targets `@earendil-works/pi-coding-agent` 0.75.x. If you bundle a newer pi and the abort marker reappears, run `npx vitest run scripts/patch-pi.test.mjs` — a failure tells you to refresh the find/replace in `scripts/patch-pi.mjs`.
+
+---
+
+## [v1.4.3] — 2026-05-19
+
+Follow-up to v1.4.2: clean up two cosmetic regressions that the @earendil-works scope migration surfaced.
+
+### Fixed
+- **Pi's `What's New` block no longer appears inside little-coder's TUI after a version bump.** Root cause: pi's interactive mode reads its own bundled `CHANGELOG.md` on startup and renders every entry strictly newer than the `lastChangelogVersion` field in `~/.pi/agent/settings.json` (`interactive-mode.js:getChangelogForDisplay`). v1.4.2 jumped the bundled pi from 0.68.1 to 0.75.3, so users who had previously launched any older little-coder saw pi's full 0.68 → 0.75 upstream changelog dumped *underneath* little-coder's own startup banner. That's wrong because little-coder is the surface and pi is the substrate — the chrome above shouldn't suddenly start advertising the substrate's release notes. The launcher (`bin/little-coder.mjs`) now pre-stamps `lastChangelogVersion` to the currently bundled pi version (resolved from `node_modules/@earendil-works/pi-coding-agent/package.json#version`, the same file we already read to find pi's cli.js, so there's no second source of truth) *before* pi starts. Pi then sees "user already saw this changelog" and the block never renders. The merge into `~/.pi/agent/settings.json` is non-destructive — `quietStartup: true` and every other existing key are preserved. Users who genuinely want pi's upstream changelog can still pull it up with `/changelog` inside the TUI.
+- **`npm install -g little-coder` no longer prints `node-domexception@1.0.0` deprecation warning.** Root cause: a 5-hop transitive — `@earendil-works/pi-ai` → `@google/genai` → `google-auth-library` → `gaxios` → `node-fetch@3` → `fetch-blob@3` → `node-domexception@1.0.0`. The `node-domexception` package is just a 16-line shim that sets `globalThis.DOMException` when undefined, and native `DOMException` has been built into Node since 18 — so on our `Node >= 22.19` floor, the entire shim is dead code. Replaced it via `package.json#overrides` pointing at a bundled stub at `./vendor/node-domexception/` that exports `module.exports = globalThis.DOMException` directly. The stub ships in the npm tarball (`files` array now includes `vendor/`). Since npm's `overrides` field is honored when little-coder is the install root (which it is for `npm install -g little-coder`), the deprecated upstream package never reaches the user's tree, and npm prints no warning. Functional behavior is identical because the only call site (`fetch-blob/from.js:import DOMException from 'node-domexception'`) sees the same `globalThis.DOMException` it would have gotten from the upstream shim.
+
+### Notes for upgraders
+- The bundled stub lives at `vendor/node-domexception/` inside the published package — it's listed under `files` in `package.json`. If you'd added your own `overrides` field that touches `node-domexception` in a hand-rolled fork of little-coder, our entry will take precedence when you publish; in the unlikely case that breaks something for you, override it back in your fork's root `package.json`.
+- The `lastChangelogVersion` pre-stamp is one-directional: it writes the *currently bundled* pi version into settings on every launch. If you'd like to see pi's upstream changelog for a future bump, `/changelog` inside the TUI is the unconditional path — it doesn't consult `lastChangelogVersion`.
+- No CLI flag, models.json shape, skill-pack, extension API, or per-model profile changes. Little-coder's own startup banner, tagline, and keybind hints (the branding extension at `.pi/extensions/branding/`) are byte-for-byte unchanged from v1.4.2.
+
+---
+
+## [v1.4.2] — 2026-05-19
+
+Bundled-pi maintenance release. Closes [#22](https://github.com/itayinbarr/little-coder/issues/22), [#23](https://github.com/itayinbarr/little-coder/issues/23), [#25](https://github.com/itayinbarr/little-coder/issues/25). The pi runtime moves from `@mariozechner/pi-coding-agent@^0.68.1` to `@earendil-works/pi-coding-agent@^0.75.3` — same author, same project, new npm scope — which makes the deprecation warnings disappear, pulls in pi's recent Windows / undici / cmd-shim fixes, and (because pi 0.75 raised its floor) bumps the supported Node range to ≥ 22.19. No CLI flag, settings, extension API, or skill-pack changes.
+
+### Fixed
+- **`npm install -g little-coder` no longer emits `@mariozechner/pi-*` deprecation warnings ([#25](https://github.com/itayinbarr/little-coder/issues/25)).** Upstream pi published the new scope as `@earendil-works/pi-coding-agent` (the `@mariozechner/*` packages remain on npm only to print the migration notice). The little-coder `package.json` dependency entry, all 21 extension import statements under `.pi/extensions/*/index.ts`, the retention-test doc comment, and the README attribution have been migrated. The public `ExtensionAPI`, `Theme`, hook event names (`before_agent_start`, `context`, `before_provider_request`, `tool_call`, `tool_result`, `turn_end`, `session_compact`, `session_start`), `pi.ui.setHeader()` / `pi.ui.setTitle()`, `registerProvider()`, and CLI flags (`--no-context-files`, `--no-extensions`, `--system-prompt`, `--extension`, `--mode rpc`, `--list-models`, `--verbose`, `--offline`) all keep their previous signatures — the rename is purely the npm scope. Full `npm run typecheck` + 152-test vitest suite passes against the new scope.
+- **Windows startup no longer fails with `'C:\Program' is not recognized as an internal or external command` ([#23](https://github.com/itayinbarr/little-coder/issues/23)).** Root cause: `bin/little-coder.mjs` was invoking `node_modules/.bin/pi.cmd` via `cmd.exe /c …`. When npm's prefix or Node's install path contained spaces (the default Windows location is `C:\Program Files\nodejs\`), the chain of nested `.cmd` shims could tokenize on the first space and execute `C:\Program` as a command name. The launcher now resolves pi's JS entry by reading `node_modules/@earendil-works/pi-coding-agent/package.json#bin.pi` and spawns `process.execPath` (the same Node that's already running) with that absolute path as an argv element. Node's `child_process.spawn` handles Windows argv quoting itself, so there is no shell tokenization at any layer — and the same spawn line works on Linux, macOS, and Windows (the previous `isWindows ? cmd.exe : piBin` branch is gone). This also picks up pi 0.75.2's own Windows fixes for cross-spawn / npm-family commands.
+- **Node version requirement bumped to ≥ 22.19.0 ([#22](https://github.com/itayinbarr/little-coder/issues/22)).** The `glob`-cannot-be-used error users hit on Node 20.x came from the bundled pi runtime depending on `glob@^13`, which itself requires Node ≥ 20.19 / 22 to run correctly. Upstream pi 0.75.0 raised its hard minimum to 22.19.0, so the bundled-pi update forces this floor onto us regardless. The launcher's `MIN_NODE` preflight, `package.json#engines.node`, `install.sh`'s version check, and the README install / troubleshooting prose are all moved together. Easiest fix: `nvm install 22 && nvm use 22`.
+
+### Notes for upgraders
+- **You must be on Node ≥ 22.19.0 to upgrade.** If `node --version` is below that, `npm install -g little-coder@1.4.2` will still install but the launcher's preflight will refuse to start pi and print the nvm hint. `npm install -g little-coder@1.4.1` keeps working on Node 20.6+ if you genuinely cannot move yet.
+- The model list, `models.json` shape, `.pi/settings.json` keys (`quietStartup`, per-model context/thinking-budget/temperature profiles, benchmark_overrides), and skill-pack are untouched. Existing `LITTLE_CODER_BASH_ALLOW`, `LITTLE_CODER_PERMISSION_MODE`, `LITTLE_CODER_MODELS_FILE`, `LLAMACPP_BASE_URL` / `OLLAMA_BASE_URL` / `LMSTUDIO_BASE_URL` / `*_API_KEY` env vars all keep their meaning.
+- If you'd hand-written an extension under your local `.pi/extensions/` that imports `from "@mariozechner/pi-coding-agent"`, change the import to `from "@earendil-works/pi-coding-agent"` and re-run. The old scope's last published version was 0.73.1 — it works against an installed `@earendil-works/pi-coding-agent` only via the legacy `@sinclair/typebox` alias that pi 0.69+ keeps for compatibility.
+
+---
+
 ## [v1.4.1] — 2026-05-16
 
 Wire fix for the v1.4.0 startup rebrand. The `[Extensions]` block was still showing for users running from outside the repo root.

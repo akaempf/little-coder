@@ -1,8 +1,9 @@
+![little-coder — a coding agent for the laptop in front of you](assets/banner.svg)
+
+
 # little-coder
 
 **A coding agent tuned for small local models, built on top of [pi](https://pi.dev).**
-
-![little-coder startup view](docs/assets/startup.svg)
 
 The research story behind all this — why scaffold–model fit matters, how a 9.7 B Qwen beat frontier entries on Aider Polyglot, and what the load-bearing mechanisms actually do — is written up on Substack: **[*Honey, I Shrunk the Coding Agent*](https://open.substack.com/pub/itayinbarr/p/honey-i-shrunk-the-coding-agent)**. Start there if you want the "why"; stay here for the "how".
 
@@ -10,13 +11,13 @@ The research story behind all this — why scaffold–model fit matters, how a 9
 
 [pi](https://pi.dev) is the minimal substrate — agent loop, multi-provider API, TUI, session tree, compaction, extension model. Four built-in tools (read / write / edit / bash) and a ~1000-token system prompt.
 
-little-coder is **pi + 20 extensions + 30 skill markdown files + a Python benchmark harness**. It doesn't fork pi or shadow its CLI — pi is a plain dependency in `package.json`, and everything little-coder-specific lives under `.pi/extensions/`, `skills/`, and `benchmarks/`. You can mix little-coder with pi packages from anyone else, add your own extensions, or disable ours per-project via `.pi/settings.json`.
+little-coder is **pi + 20 extensions + 30 skill markdown files + a Python benchmark harness**. It doesn't fork pi or shadow its CLI — pi is a plain dependency in `package.json`, and everything little-coder-specific lives under `.pi/extensions/`, `skills/`, and `benchmarks/`. The launcher runs pi with `--no-extensions` and wires in exactly the bundled set, so you add your own extension by dropping a directory into `.pi/extensions/` (or passing `little-coder -e /path/to/ext/index.ts` at launch) and remove one of ours by deleting its directory. Note this also means a globally `pi install`'d package won't load inside little-coder — `pi install` registers into pi's settings, which `--no-extensions` skips.
 
 If you've never used pi, it's useful to skim [pi.dev](https://pi.dev) first — the rest of this doc assumes pi's model of `--agent-import-path`, `--mode rpc`, and `.pi/extensions/` auto-discovery.
 
 ## Install
 
-One-line install (Node.js 20.6+ required):
+One-line install (Node.js 22.19+ required):
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/itayinbarr/little-coder/main/install.sh | bash
@@ -36,7 +37,7 @@ bun add -g little-coder
 
 That's the whole install. No clone, no `npm install` in a workspace, no PATH fiddling. `little-coder` is now on your PATH and works from any directory.
 
-> **Note for `bun add -g` users.** The launcher (`bin/little-coder.mjs`) is a Node.js script with `#!/usr/bin/env node` at the top, so Node ≥ 20.6 still has to be on your PATH for the binary to start — bun is fine for installing/updating the package, but the runtime is Node. If you want a fully node-less setup, replace the shebang in `$(bun pm bin -g)/little-coder` with `#!/usr/bin/env bun`.
+> **Note for `bun add -g` users.** The launcher (`bin/little-coder.mjs`) is a Node.js script with `#!/usr/bin/env node` at the top, so Node ≥ 22.19 still has to be on your PATH for the binary to start — bun is fine for installing/updating the package, but the runtime is Node. If you want a fully node-less setup, replace the shebang in `$(bun pm bin -g)/little-coder` with `#!/usr/bin/env bun`.
 
 ## Run
 
@@ -242,9 +243,15 @@ All runs used a consumer laptop: i9-14900HX, 32 GB RAM, **8 GB VRAM** on RTX 507
 
 That spans short coding exercises (Polyglot), interactive shell-bound tasks (Terminal-Bench), and tool-using research (GAIA), all on the same scaffold. The data needed to choose what to fix next is now in hand.
 
-**Phase 2 — iterative improvement on real-world tasks: starting now.** The motivating question shifts from *how wide is the impact radius?* to *which scaffolding changes compound on long-horizon real work?* The signal we have already points at concrete things to try — thinking-budget / quality-monitor behavior on long-horizon tasks, deliberate.py-style parallel branches on failure, better shell-session recovery for interactive-process traps, evidence-handling on multi-document GAIA L3 tasks — but the priority order comes from real-world use, not from a benchmark suite. Expect smaller, more frequent releases driven by what little-coder actually struggles with on day-to-day coding work.
+**Phase 2 — operating real knowledge bases as day-to-day work: the current focus.** The motivating question shifts from *how wide is the impact radius?* to *can a small local model reliably operate and traverse a large, messy knowledge base?* little-coder's day-to-day target is now real work over **many markdown files at once** — reading, cross-referencing, and updating sprawling note/log collections in the most token-efficient way a small local model can manage. Features are being implemented and tested across several real pipelines in parallel:
 
-**Future benchmarks (deferred).** New benchmarks like **ProgramBench**, SWE-bench Verified (multi-file real-world patches), and a GAIA test-split run come back into scope after Phase 2 has produced enough scaffolding signal to make a fresh measurement worth running. Re-benchmarking before the next round of changes lands would mostly re-measure the same baseline.
+- **Domains** — medical, athletic, and educational knowledge bases, each with its own structure, vocabulary, and citation needs.
+- **Scale** — 10+ years of logs, tens of thousands of entries of varied kinds, stressing retrieval, compaction, and the context-budgeting extensions on histories far longer than any single benchmark task.
+- **Messy real-world inputs** — validation against conflicting OCR extractions of the same source, and multilingual content where the same fact recurs across languages.
+
+This is where the scaffolding work now compounds: knowledge injection/selection, evidence handling, compaction fidelity, and the harness-intervention behaviors. Expect smaller, more frequent releases driven by what little-coder actually struggles with on this work rather than by a benchmark suite.
+
+**Benchmarks (deferred).** The four-benchmark baseline above stands as the scaffold-fit reference point. Fresh runs — **ProgramBench**, SWE-bench Verified (multi-file real-world patches), a GAIA test split — come back into scope once the knowledge-base work has produced enough scaffolding signal to make a new measurement worth running.
 
 ---
 
@@ -264,7 +271,7 @@ That spans short coding exercises (Polyglot), interactive shell-bound tasks (Ter
 
 **Extension load failures on startup** — run `little-coder --list-models --verbose`; extension errors surface there. If the install looks corrupt: `npm uninstall -g little-coder && npm install -g little-coder`.
 
-**Node version too old** — little-coder needs Node ≥ 20.6.0. Check with `node --version`. Easiest fix: `nvm install 20 && nvm use 20`.
+**Node version too old** — little-coder needs Node ≥ 22.19.0 (matching the minimum of the bundled `@earendil-works/pi-coding-agent` v0.75+). Check with `node --version`. Easiest fix: `nvm install 22 && nvm use 22`.
 
 ---
 
@@ -292,10 +299,11 @@ The benchmarks harness (`benchmarks/`) is dev-only and not shipped with the npm 
 little-coder/
 ├── .pi/
 │   ├── settings.json               # per-model profiles + benchmark_overrides (terminal_bench, gaia)
-│   └── extensions/                 # 21 TypeScript extensions, auto-discovered by pi
+│   └── extensions/                 # 23 TypeScript extensions, auto-discovered by pi
 │       ├── branding/               # little-coder startup header + terminal title (replaces pi's built-in)
 │       ├── llama-cpp-provider/     # data-driven provider registration from models.json — ships llamacpp, ollama, lmstudio (+ user override file)
 │       ├── write-guard/            # Write refuses on existing files; rewrites root-bare /foo.md paths to cwd
+│       ├── read-guard/             # trims a Read that would overflow the context window to its first 30 lines + a search-instead directive
 │       ├── extra-tools/            # glob, webfetch, websearch (pi ships grep/find)
 │       ├── skill-inject/           # per-turn tool-skill selection (error > recency > intent)
 │       ├── knowledge-inject/       # algorithm cheat-sheet scoring (word=1.0, bigram=2.0, threshold=2.0)
@@ -330,7 +338,7 @@ little-coder/
     └── architecture.md             # v0.0.5-era Python architecture (historical)
 ```
 
-**Key invariant.** pi is a minimal base by design. Every little-coder mechanism ships as a pi extension that hooks pi's lifecycle events (`before_agent_start`, `context`, `before_provider_request`, `tool_call`, `tool_result`, `turn_end`, `session_compact`). Extensions are independent and can be enabled/disabled per deployment via `.pi/settings.json`. If you don't want one, delete its directory or disable it in settings; if you want to add another, drop it next to the existing ones.
+**Key invariant.** pi is a minimal base by design. Every little-coder mechanism ships as a pi extension that hooks pi's lifecycle events (`before_agent_start`, `context`, `before_provider_request`, `tool_call`, `tool_result`, `turn_end`, `session_compact`). Extensions are independent: the launcher discovers every `.pi/extensions/*/index.ts` and loads it explicitly with `--extension`, and pi runs with `--no-extensions`, so the bundled set is exactly what loads — no more, no less. If you don't want one, delete its directory; if you want to add another, drop it next to the existing ones (or pass `-e <path>` at launch).
 
 ---
 
@@ -367,7 +375,7 @@ The paper ran `ollama/qwen3.5` through the Python little-coder at commit **`1d62
 
 little-coder v0.0.x was a derivative work of [CheetahClaws / ClawSpring](https://github.com/SafeRL-Lab/clawspring) by SafeRL-Lab, Apache 2.0. That upstream provided the Python agent substrate, tool system, multi-provider support, and REPL.
 
-little-coder v0.1.0+ replaces that substrate with **[pi](https://github.com/badlogic/pi-mono)** (`@mariozechner/pi-coding-agent`) by Mario Zechner — Apache 2.0 / MIT. pi provides the agent loop, provider abstraction, TUI, and extension model. little-coder rebuilds its small-model adaptations on top of pi as extensions.
+little-coder v0.1.0+ replaces that substrate with **[pi](https://pi.dev)** by Mario Zechner — Apache 2.0 / MIT. The npm package was renamed from `@mariozechner/pi-coding-agent` to `@earendil-works/pi-coding-agent` in upstream's 0.74 release; little-coder v1.4.2+ ships with the new package. pi provides the agent loop, provider abstraction, TUI, and extension model. little-coder rebuilds its small-model adaptations on top of pi as extensions.
 
 All little-coder-specific mechanisms — Write-vs-Edit invariant, skill / knowledge injection, thinking-budget cap, output-parser, quality-monitor, per-model profiles, per-benchmark overrides, ShellSession / Browser / Evidence tool families, evidence-aware compaction — are preserved across versions.
 
