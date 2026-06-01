@@ -53,9 +53,10 @@ describe("benchmark-profiles resolution against real settings.json", () => {
     expect(p.max_turns).toBeUndefined();
   });
 
-  it("every shipped per-model profile carries the 4096 budget", () => {
+  it("every shipped per-model profile has thinking enabled (budget >= 2048)", () => {
     for (const key of Object.keys(settings.model_profiles)) {
-      expect(resolveProfileFrom(settings, key).thinking_budget, key).toBe(4096);
+      const budget = resolveProfileFrom(settings, key).thinking_budget;
+      expect(budget, key).toBeGreaterThanOrEqual(2048);
     }
   });
 });

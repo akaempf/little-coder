@@ -68,6 +68,7 @@ export default function (pi: ExtensionAPI) {
       return;
     }
 
+    const correction = buildCorrectionMessage(verdict.reason);
     consecutiveFailures++;
     if (consecutiveFailures > MAX_CONSECUTIVE_CORRECTIONS) {
      harnessIntervention(

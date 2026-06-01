@@ -186,7 +186,7 @@ describe("shipped models.json", () => {
     expect(lmstudio, "lmstudio provider should be present in shipped models.json").toBeDefined();
     expect(lmstudio.baseUrl).toBe("http://127.0.0.1:1234/v1");
     expect(lmstudio.api).toBe("openai-completions");
-    expect(lmstudio.apiKey).toBe("LMSTUDIO_API_KEY");
+    expect(lmstudio.apiKey).toBe("$LMSTUDIO_API_KEY");
     expect(lmstudio.models.find((m) => m.id === "local-model")).toBeDefined();
   });
 

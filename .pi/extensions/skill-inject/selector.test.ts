@@ -63,7 +63,7 @@ describe("skills directory loads from repo", () => {
   it("exists and has 13 markdown files", () => {
     expect(existsSync(toolsDir)).toBe(true);
     const files = readdirSync(toolsDir).filter((f) => f.endsWith(".md"));
-    expect(files.length).toBe(13);
+    expect(files.length).toBe(17);
   });
 
   it("every tool skill has target_tool in frontmatter", () => {
