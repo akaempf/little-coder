@@ -77,6 +77,68 @@
       ],
       "autoActivate": false
     },
+    "filesystem": {
+      "command": "mcp-server-filesystem",
+      "args": ["/Users/akaempf", "/Volumes/DasWork"],
+      "env": {
+        "HOME": "/Users/akaempf"
+      },
+      "description": "Filesystem operations — move, rename, copy, directory trees, file metadata",
+      "triggerKeywords": [
+        "move file",
+        "rename file",
+        "copy file",
+        "duplicate file",
+        "move folder",
+        "rename folder",
+        "directory tree",
+        "file tree",
+        "folder tree",
+        "file size",
+        "file metadata",
+        "file info",
+        "disk usage",
+        "create directory",
+        "create folder",
+        "DasWork",
+        "/Volumes"
+      ],
+      "autoActivate": false
+    },
+    "context7": {
+      "url": "https://mcp.context7.com/mcp",
+      "description": "Library and framework documentation — version-accurate API references",
+      "triggerKeywords": [
+        "context7",
+        "library docs",
+        "api reference",
+        "framework docs",
+        "documentation for",
+        "docs for",
+        "how do i use",
+        "how to use",
+        "example for",
+        "syntax for",
+        "show me how",
+        "next.js",
+        "express docs",
+        "fastapi docs",
+        "django docs",
+        "flask docs",
+        "vue docs",
+        "angular docs",
+        "svelte docs",
+        "tailwind docs",
+        "prisma docs",
+        "drizzle docs",
+        "supabase docs",
+        "react docs",
+        "typescript docs",
+        "python docs"
+      ],
+      "excludeTools": ["WebSearch", "exa-websearch", "WebFetch"],
+      "autoActivate": false
+    },
     "dynatrace": {
       "command": "mcp-server-dynatrace",
       "args": [],
