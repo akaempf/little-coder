@@ -1,0 +1,112 @@
+--- a/node_modules/@earendil-works/pi-agent-core/dist/agent-loop.js
++++ b/node_modules/@earendil-works/pi-agent-core/dist/agent-loop.js
+@@ -3,6 +3,9 @@
+  * Transforms to Message[] only at the LLM call boundary.
+  */
+ import { EventStream, streamSimple, validateToolArguments, } from "@earendil-works/pi-ai";
++
++let _steeringInterrupt = false;
++let _pendingSteeringMessages = [];
+ /**
+  * Start an agent loop with a new prompt message.
+  * The prompt is added to the context and events are emitted for it.
+@@ -80,11 +83,24 @@
+     let firstTurn = true;
+     // Check for steering messages at start (user may have typed while waiting)
+     let pendingMessages = (await config.getSteeringMessages?.()) || [];
++
++    _steeringInterrupt = false;
++    _pendingSteeringMessages = [];
+     // Outer loop: continues when queued follow-up messages arrive after agent would stop
+     while (true) {
+         let hasMoreToolCalls = true;
+         // Inner loop: process tool calls and steering messages
+         while (hasMoreToolCalls || pendingMessages.length > 0) {
++            if (_steeringInterrupt) {
++                for (const message of _pendingSteeringMessages) {
++                    await emit({ type: "message_start", message });
++                    await emit({ type: "message_end", message });
++                    currentContext.messages.push(message);
++                    newMessages.push(message);
++                }
++                _steeringInterrupt = false;
++                _pendingSteeringMessages = [];
++            }
+             if (!firstTurn) {
+                 await emit({ type: "turn_start" });
+             }
+@@ -114,7 +130,7 @@
+             const toolResults = [];
+             hasMoreToolCalls = false;
+             if (toolCalls.length > 0) {
+-                const executedToolBatch = await executeToolCalls(currentContext, message, config, signal, emit);
++                const executedToolBatch = await executeToolCalls(currentContext, message, config, signal, emit, newMessages);
+                 toolResults.push(...executedToolBatch.messages);
+                 hasMoreToolCalls = !executedToolBatch.terminate;
+                 for (const result of toolResults) {
+@@ -251,18 +267,27 @@
+ /**
+  * Execute tool calls from an assistant message.
+  */
+-async function executeToolCalls(currentContext, assistantMessage, config, signal, emit) {
++async function executeToolCalls(currentContext, assistantMessage, config, signal, emit, newMessages) {
+     const toolCalls = assistantMessage.content.filter((c) => c.type === "toolCall");
+     const hasSequentialToolCall = toolCalls.some((tc) => currentContext.tools?.find((t) => t.name === tc.name)?.executionMode === "sequential");
+     if (config.toolExecution === "sequential" || hasSequentialToolCall) {
+-        return executeToolCallsSequential(currentContext, assistantMessage, toolCalls, config, signal, emit);
++        return executeToolCallsSequential(currentContext, assistantMessage, toolCalls, config, signal, emit, newMessages);
+     }
+-    return executeToolCallsParallel(currentContext, assistantMessage, toolCalls, config, signal, emit);
++    return executeToolCallsParallel(currentContext, assistantMessage, toolCalls, config, signal, emit, newMessages);
+ }
+-async function executeToolCallsSequential(currentContext, assistantMessage, toolCalls, config, signal, emit) {
++async function executeToolCallsSequential(currentContext, assistantMessage, toolCalls, config, signal, emit, newMessages) {
+     const finalizedCalls = [];
+     const messages = [];
+     for (const toolCall of toolCalls) {
++        if (_steeringInterrupt) {
++            for (const message of _pendingSteeringMessages) {
++                await emit({ type: "message_start", message });
++                await emit({ type: "message_end", message });
++                currentContext.messages.push(message);
++            }
++            _steeringInterrupt = false;
++            _pendingSteeringMessages = [];
++        }
+         await emit({
+             type: "tool_execution_start",
+             toolCallId: toolCall.id,
+@@ -296,9 +321,18 @@
+         terminate: shouldTerminateToolBatch(finalizedCalls),
+     };
+ }
+-async function executeToolCallsParallel(currentContext, assistantMessage, toolCalls, config, signal, emit) {
++async function executeToolCallsParallel(currentContext, assistantMessage, toolCalls, config, signal, emit, newMessages) {
+     const finalizedCalls = [];
+     for (const toolCall of toolCalls) {
++        if (_steeringInterrupt) {
++            for (const message of _pendingSteeringMessages) {
++                await emit({ type: "message_start", message });
++                await emit({ type: "message_end", message });
++                currentContext.messages.push(message);
++            }
++            _steeringInterrupt = false;
++            _pendingSteeringMessages = [];
++        }
+         await emit({
+             type: "tool_execution_start",
+             toolCallId: toolCall.id,
+@@ -366,6 +400,13 @@
+             isError: true,
+         };
+     }
++    if (signal?.aborted) {
++        return {
++            kind: "immediate",
++            result: createErrorToolResult("Operation aborted"),
++            isError: true,
++        };
++    }
+     try {
+         const preparedToolCall = prepareToolCallArguments(tool, toolCall);
+         const validatedArgs = validateToolArguments(tool, preparedToolCall);
