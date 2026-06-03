@@ -139,6 +139,44 @@
       "excludeTools": ["WebSearch", "exa-websearch", "WebFetch"],
       "autoActivate": false
     },
+    "aws-api": {
+      "command": "/Users/akaempf/.local/venvs/aws-api-mcp/bin/python3.13",
+      "args": ["-m", "awslabs.aws_api_mcp_server.server"],
+      "env": {
+        "AWS_PROFILE": "sso-sha106",
+        "AWS_REGION": "us-east-1",
+        "PYTHONPATH": "",
+        "HOME": "/Users/akaempf"
+      },
+      "description": "AWS API — query and manage AWS resources via the CLI/API (S3, EC2, Lambda, IAM, RDS, ECS, CloudWatch, etc.)",
+      "triggerKeywords": [
+        "aws",
+        "s3",
+        "ec2",
+        "lambda",
+        "iam",
+        "cloudformation",
+        "cloudwatch",
+        "rds",
+        "dynamodb",
+        "ecs",
+        "eks",
+        "sqs",
+        "sns",
+        "kinesis",
+        "route53",
+        "vpc",
+        "elb",
+        "alb",
+        "api gateway",
+        "secrets manager",
+        "ssm parameter",
+        "aws api",
+        "aws cli",
+        "boto3"
+      ],
+      "autoActivate": false
+    },
     "dynatrace": {
       "command": "mcp-server-dynatrace",
       "args": [],

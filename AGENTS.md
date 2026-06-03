@@ -35,7 +35,7 @@ Additional tools appear per benchmark: `BrowserNavigate`/`Click`/`Type`/`Scroll`
 Auto-activated by keyword. Tools appear as `mcp__<server>__<tool>`.
 Manual: `mcp_activate("name")` / `mcp_deactivate("name")`.
 
-Servers: jira, confluence, github, dynatrace, filesystem, sqz, context7.
+Servers: jira, confluence, github, dynatrace, filesystem, sqz, context7, aws-api.
 
 ### Dynatrace
 
