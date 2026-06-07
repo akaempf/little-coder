@@ -1,4 +1,5 @@
 {
+  "excludeServers": ["sqz"],
   "mcpServers": {
     "atlassian-jira": {
       "command": "mcp-atlassian-jira",
@@ -31,7 +32,10 @@
         "standup",
         "retrospective"
       ],
-      "includeTools": ["jira_get", "jira_post"],
+      "includeTools": [
+        "jira_get",
+        "jira_post"
+      ],
       "autoActivate": false
     },
     "atlassian-confluence": {
@@ -54,7 +58,10 @@
         "technical spec",
         "team page"
       ],
-      "includeTools": ["conf_get", "conf_post"],
+      "includeTools": [
+        "conf_get",
+        "conf_post"
+      ],
       "autoActivate": false
     },
     "github": {
@@ -90,11 +97,14 @@
     },
     "filesystem": {
       "command": "mcp-server-filesystem",
-      "args": ["/Users/akaempf", "/Volumes/DasWork"],
+      "args": [
+        "/Users/akaempf",
+        "/Volumes/DasWork"
+      ],
       "env": {
         "HOME": "/Users/akaempf"
       },
-      "description": "Filesystem operations — move, rename, copy, directory trees, file metadata",
+      "description": "Filesystem operations \u2014 move, rename, copy, directory trees, file metadata",
       "triggerKeywords": [
         "move file",
         "rename file",
@@ -126,7 +136,7 @@
     },
     "context7": {
       "url": "https://mcp.context7.com/mcp",
-      "description": "Library and framework documentation — version-accurate API references",
+      "description": "Library and framework documentation \u2014 version-accurate API references",
       "triggerKeywords": [
         "context7",
         "library docs",
@@ -155,19 +165,26 @@
         "typescript docs",
         "python docs"
       ],
-      "excludeTools": ["WebSearch", "exa-websearch", "WebFetch"],
+      "excludeTools": [
+        "WebSearch",
+        "exa-websearch",
+        "WebFetch"
+      ],
       "autoActivate": false
     },
     "aws-api": {
       "command": "/Users/akaempf/.local/venvs/aws-api-mcp/bin/python3.13",
-      "args": ["-m", "awslabs.aws_api_mcp_server.server"],
+      "args": [
+        "-m",
+        "awslabs.aws_api_mcp_server.server"
+      ],
       "env": {
         "AWS_PROFILE": "sso-sha106",
         "AWS_REGION": "us-east-1",
         "PYTHONPATH": "",
         "HOME": "/Users/akaempf"
       },
-      "description": "AWS API — query and manage AWS resources via the CLI/API (S3, EC2, Lambda, IAM, RDS, ECS, CloudWatch, etc.)",
+      "description": "AWS API \u2014 query and manage AWS resources via the CLI/API (S3, EC2, Lambda, IAM, RDS, ECS, CloudWatch, etc.)",
       "triggerKeywords": [
         "aws",
         "s3",
@@ -196,12 +213,6 @@
       ],
       "autoActivate": false
     },
-    "sqz": {
-      "command": "sqz-mcp",
-      "args": ["--transport", "stdio"],
-      "description": "Compressed file reads, greps, directory listings — saves tokens on every file op",
-      "autoActivate": true
-    },
     "dynatrace": {
       "command": "mcp-server-dynatrace",
       "args": [],
@@ -229,6 +240,31 @@
       ],
       "autoActivate": false,
       "keepAlive": true
+    },
+    "engram": {
+      "command": "engram",
+      "args": ["mcp"],
+      "description": "structured memory — SQLite+FTS5 observations, sessions, timeline",
+      "triggerKeywords": [
+        "save-session",
+        "save session",
+        "session-summary",
+        "note to self",
+        "decision log",
+        "learning log",
+        "remember this",
+        "recall",
+        "engram"
+      ],
+      "includeTools": [
+        "mem_context",
+        "mem_search",
+        "mem_save",
+        "mem_session_summary",
+        "mem_session_start",
+        "mem_session_end"
+      ],
+      "autoActivate": false
     }
   }
 }

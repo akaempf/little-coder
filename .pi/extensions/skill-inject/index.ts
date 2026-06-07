@@ -74,6 +74,11 @@ const INTENT_MAP: Record<string, string[]> = {
   vulnerability: ["dynatrace_list_vulnerabilities"],
   vulnerabilities: ["dynatrace_list_vulnerabilities"],
   exceptions: ["dynatrace_list_exceptions"],
+  "save-session": ["engram_mem_session_summary"],
+  "session-summary": ["engram_mem_session_summary"],
+  engram: ["engram_mem_session_summary", "engram_mem_search"],
+  recall: ["engram_mem_search"],
+  remember: ["engram_mem_save"],
 };
 
 function skillsDir(): string {

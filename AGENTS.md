@@ -32,10 +32,10 @@ Additional tools appear per benchmark: `BrowserNavigate`/`Click`/`Type`/`Scroll`
 
 ## MCP Servers
 
-Auto-activated by keyword. Tools appear as `mcp__<server>__<tool>`.
+Auto-activated by keyword. Tools appear as `{serverName}_{toolName}` (e.g. `engram_mem_session_summary`, `atlassian-jira_jira_get`).
 Manual: `mcp_activate("name")` / `mcp_deactivate("name")`.
 
-Servers: jira, confluence, github, dynatrace, filesystem, sqz, context7, aws-api.
+Servers: jira, confluence, github, dynatrace, filesystem, context7, aws-api, engram.
 
 ### Dynatrace
 
@@ -60,18 +60,16 @@ For local git operations (status, log, diff, commit, push), ALWAYS use `bash` wi
 atlassian-jira_jira_get(path="/rest/api/3/search/jql", queryParams={"jql": "assignee=currentUser() AND status != Done", "maxResults": "50"})
 ```
 
-### Memory
+### Memory (engram)
 
-agentmemory — runs as a **pi extension** (not MCP). Talks directly to REST API at `:3111`.
-- Auto-searches memory and injects relevant context into system prompt before every turn (`before_agent_start`)
-- Auto-saves turns after every response (`agent_end`)
-- Exposes two native tools: `memory_search` and `memory_save`
+On-demand — activates on keywords ("save-session", "remember this", "recall", etc.). No auto-injection.
+Always pass `project: "pi"` explicitly. If activation fails, skip silently.
 
-No keyword activation needed — it's always active via the extension lifecycle. If the server is unreachable, it warns once and continues silently.
+**IMPORTANT: When the user says "save-session" or "save session" — call `engram_mem_session_summary` directly. Do NOT use Bash, ShellSession, or any CLI command.**
 
-**To explicitly recall something**: use the `memory_search` tool directly.
-**To save something**: use `memory_save` with a concise description.
-**During work** (only when relevant): call `memory_save` for decisions, bugfixes, preferences worth keeping.
+- **Recall**: `engram_mem_search(query: "...", project: "pi", limit: 5)`
+- **Save**: `engram_mem_save(title: "...", content: "**What**:...", type: "bugfix|decision|pattern", project: "pi")`
+- **End of session**: `engram_mem_session_summary(content: "## Goal\n...\n## Accomplished\n- ...\n## Next Steps\n- ...", session_id: "manual-save-pi")`
 
 # Approaching complex tasks
 
