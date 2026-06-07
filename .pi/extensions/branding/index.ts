@@ -62,10 +62,9 @@ function buildHeader(theme: Theme): string[] {
   const sep = theme.fg("muted", " · ");
   const hints = [
     `${dim("esc")} interrupt`,
-    `${dim("ctrl-l/ctrl-c")} clear/exit`,
+    `${dim("ctrl-c/ctrl-d")} clear/exit`,
     `${dim("/")} commands`,
     `${dim("!")} bash`,
-    `${dim("ctrl-r")} more`,
   ].join(sep);
   return ["", logo, tagline, "", hints, ""];
 }

@@ -19,7 +19,7 @@
 //      and a user ESC is self-evident; the stacked red marker was noise. A
 //      genuine custom errorMessage (not the default abort string) is preserved.
 
-import { readFileSync, writeFileSync, existsSync } from "node:fs";
+import { copyFileSync, readFileSync, writeFileSync, existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createRequire } from "node:module";
@@ -97,6 +97,48 @@ export function applyPiPatches(piRootOverride) {
       if (src.includes(p.applied)) continue; // already patched
       if (!src.includes(p.find)) continue; // pi changed — skip silently
       writeFileSync(file, src.replace(p.find, p.replace));
+    } catch {
+      // best-effort: never break install or launch
+    }
+  }
+  syncNestedPiAgentCore(piRoot);
+}
+
+/**
+ * npm `overrides` doesn't always deduplicate pi-agent-core inside
+ * pi-coding-agent's own node_modules, so the patch-package patch applied to
+ * the top-level copy never reaches the nested copy that pi-coding-agent
+ * actually imports.  This function syncs the two: once the top-level copy
+ * has been patched by patch-package (sentinel: contains `_steeringInterrupt`),
+ * copy it over the nested copy if the nested copy is still unpatched.
+ *
+ * Called from applyPiPatches so it runs at postinstall AND on every launch
+ * (self-healing).  Best-effort and idempotent.
+ *
+ * @param {string} piRoot  Resolved pi-coding-agent package root.
+ */
+function syncNestedPiAgentCore(piRoot) {
+  // pi-coding-agent lives at <nm>/@earendil-works/pi-coding-agent;
+  // the top-level pi-agent-core is its sibling: <nm>/@earendil-works/pi-agent-core
+  const coreBase = join(piRoot, "..", "pi-agent-core", "dist");
+  const nestedBase = join(piRoot, "node_modules", "@earendil-works", "pi-agent-core", "dist");
+
+  // Each entry: [filename, sentinel string that proves the patch is applied]
+  const FILES = [
+    ["agent-loop.js", "_steeringInterrupt"],
+    ["agent.js",      "injectSteeringMessage(message)"],
+  ];
+
+  for (const [file, sentinel] of FILES) {
+    try {
+      const topLevel = join(coreBase, file);
+      const nested   = join(nestedBase, file);
+      if (!existsSync(topLevel) || !existsSync(nested)) continue;
+      const topSrc = readFileSync(topLevel, "utf8");
+      if (!topSrc.includes(sentinel)) continue; // top-level not yet patched — skip
+      const nestedSrc = readFileSync(nested, "utf8");
+      if (nestedSrc.includes(sentinel)) continue; // nested already in sync
+      copyFileSync(topLevel, nested);
     } catch {
       // best-effort: never break install or launch
     }
