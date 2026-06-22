@@ -125,7 +125,10 @@ function syncNestedPiAgentCore(piRoot) {
 
   // Each entry: [filename, sentinel string that proves the patch is applied]
   const FILES = [
-    ["agent-loop.js", "_steeringInterrupt"],
+    // Sentinel must be unique to the NEW patch — "_steeringInterrupt" is present
+    // in both old and new patches, so it would incorrectly skip the sync when
+    // the nested copy has only the old (no stream-abort) version of the patch.
+    ["agent-loop.js", "_activeStreamAbort"],
     ["agent.js",      "injectSteeringMessage(message)"],
   ];
 
