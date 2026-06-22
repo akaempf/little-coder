@@ -1,8 +1,8 @@
 diff --git a/node_modules/@earendil-works/pi-agent-core/dist/agent-loop.js b/node_modules/@earendil-works/pi-agent-core/dist/agent-loop.js
-index 5b6becd..f4b054a 100644
+index 5b6becd..f079ab9 100644
 --- a/node_modules/@earendil-works/pi-agent-core/dist/agent-loop.js
 +++ b/node_modules/@earendil-works/pi-agent-core/dist/agent-loop.js
-@@ -3,6 +3,15 @@
+@@ -3,6 +3,26 @@
   * Transforms to Message[] only at the LLM call boundary.
   */
  import { EventStream, streamSimple, validateToolArguments, } from "@earendil-works/pi-ai";
@@ -10,15 +10,26 @@ index 5b6becd..f4b054a 100644
 +let _steeringInterrupt = false;
 +let _pendingSteeringMessages = [];
 +let _activeStreamAbort = null;
++let _partialOutput = "";
 +export function injectSteeringMessage(message) {
 +    _pendingSteeringMessages.push(message);
++    // If there's partial text output, inject a resume hint so the model
++    // continues from where it left off rather than restarting from scratch.
++    if (_partialOutput && _partialOutput.trim().length > 50) {
++        const _snippet = _partialOutput.slice(-200);
++        _pendingSteeringMessages.push({
++            role: "user",
++            content: [{ type: "text", text: `[System: You were mid-response when interrupted. Process the message above, then continue your response. Your response was cut off at: "...${_snippet}"]` }],
++            timestamp: Date.now(),
++        });
++    }
 +    _steeringInterrupt = true;
 +    _activeStreamAbort?.abort();
 +}
  /**
   * Start an agent loop with a new prompt message.
   * The prompt is added to the context and events are emitted for it.
-@@ -80,11 +89,25 @@ async function runLoop(initialContext, newMessages, initialConfig, signal, emit,
+@@ -80,11 +100,26 @@ async function runLoop(initialContext, newMessages, initialConfig, signal, emit,
      let firstTurn = true;
      // Check for steering messages at start (user may have typed while waiting)
      let pendingMessages = (await config.getSteeringMessages?.()) || [];
@@ -26,6 +37,7 @@ index 5b6becd..f4b054a 100644
 +    _steeringInterrupt = false;
 +    _pendingSteeringMessages = [];
 +    _activeStreamAbort = null;
++    _partialOutput = "";
      // Outer loop: continues when queued follow-up messages arrive after agent would stop
      while (true) {
          let hasMoreToolCalls = true;
@@ -45,11 +57,12 @@ index 5b6becd..f4b054a 100644
              if (!firstTurn) {
                  await emit({ type: "turn_start" });
              }
-@@ -102,10 +125,16 @@ async function runLoop(initialContext, newMessages, initialConfig, signal, emit,
+@@ -102,10 +137,17 @@ async function runLoop(initialContext, newMessages, initialConfig, signal, emit,
                  pendingMessages = [];
              }
              // Stream assistant response
 +            _activeStreamAbort = new AbortController();
++            _partialOutput = "";
              const message = await streamAssistantResponse(currentContext, config, signal, emit, streamFn);
 +            _activeStreamAbort = null;
              newMessages.push(message);
@@ -62,7 +75,7 @@ index 5b6becd..f4b054a 100644
                  await emit({ type: "agent_end", messages: newMessages });
                  return;
              }
-@@ -114,7 +143,7 @@ async function runLoop(initialContext, newMessages, initialConfig, signal, emit,
+@@ -114,7 +156,7 @@ async function runLoop(initialContext, newMessages, initialConfig, signal, emit,
              const toolResults = [];
              hasMoreToolCalls = false;
              if (toolCalls.length > 0) {
@@ -71,7 +84,7 @@ index 5b6becd..f4b054a 100644
                  toolResults.push(...executedToolBatch.messages);
                  hasMoreToolCalls = !executedToolBatch.terminate;
                  for (const result of toolResults) {
-@@ -186,10 +215,13 @@ async function streamAssistantResponse(context, config, signal, emit, streamFn)
+@@ -186,10 +228,13 @@ async function streamAssistantResponse(context, config, signal, emit, streamFn)
      const streamFunction = streamFn || streamSimple;
      // Resolve API key (important for expiring tokens)
      const resolvedApiKey = (config.getApiKey ? await config.getApiKey(config.model.provider) : undefined) || config.apiKey;
@@ -86,7 +99,18 @@ index 5b6becd..f4b054a 100644
      });
      let partialMessage = null;
      let addedPartial = false;
-@@ -251,18 +283,28 @@ async function streamAssistantResponse(context, config, signal, emit, streamFn)
+@@ -213,6 +258,10 @@ async function streamAssistantResponse(context, config, signal, emit, streamFn)
+                 if (partialMessage) {
+                     partialMessage = event.partial;
+                     context.messages[context.messages.length - 1] = partialMessage;
++                    if (event.type === "text_delta" || event.type === "text_end") {
++                        const _textParts = partialMessage.content.filter((c) => c.type === "text").map((c) => c.text);
++                        if (_textParts.length > 0) _partialOutput = _textParts.join("");
++                    }
+                     await emit({
+                         type: "message_update",
+                         assistantMessageEvent: event,
+@@ -251,18 +300,28 @@ async function streamAssistantResponse(context, config, signal, emit, streamFn)
  /**
   * Execute tool calls from an assistant message.
   */
@@ -119,7 +143,7 @@ index 5b6becd..f4b054a 100644
          await emit({
              type: "tool_execution_start",
              toolCallId: toolCall.id,
-@@ -296,9 +338,19 @@ async function executeToolCallsSequential(currentContext, assistantMessage, tool
+@@ -296,9 +355,19 @@ async function executeToolCallsSequential(currentContext, assistantMessage, tool
          terminate: shouldTerminateToolBatch(finalizedCalls),
      };
  }
@@ -140,7 +164,7 @@ index 5b6becd..f4b054a 100644
          await emit({
              type: "tool_execution_start",
              toolCallId: toolCall.id,
-@@ -366,6 +418,13 @@ async function prepareToolCall(currentContext, assistantMessage, toolCall, confi
+@@ -366,6 +435,13 @@ async function prepareToolCall(currentContext, assistantMessage, toolCall, confi
              isError: true,
          };
      }
