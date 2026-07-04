@@ -70,15 +70,21 @@ const piPkgCandidates = [
   join(dirname(pkgRoot), "@earendil-works", "pi-coding-agent"),
 ];
 let piEntry;
+// piPkgRoot: the resolved pi package root. Module-scoped on purpose — the
+// launch-time patch self-heal (step 3b) and the bundled-pi-version read
+// (step 8) both reach it. Upstream's multi-candidate loop (issue #56) made the
+// iteration variable block-scoped, so capture the winning candidate here.
+let piPkgRoot;
 let piResolveErr;
-for (const piPkgRoot of piPkgCandidates) {
+for (const candidateRoot of piPkgCandidates) {
   try {
-    const piPkgJson = JSON.parse(readFileSync(join(piPkgRoot, "package.json"), "utf-8"));
+    const piPkgJson = JSON.parse(readFileSync(join(candidateRoot, "package.json"), "utf-8"));
     const binRel = typeof piPkgJson?.bin === "string" ? piPkgJson.bin : piPkgJson?.bin?.pi;
     if (typeof binRel !== "string") throw new Error("pi package.json has no bin.pi entry");
-    const candidate = resolve(piPkgRoot, binRel);
+    const candidate = resolve(candidateRoot, binRel);
     if (existsSync(candidate)) {
       piEntry = candidate;
+      piPkgRoot = candidateRoot;
       break;
     }
     piResolveErr = new Error(`resolved bin ${candidate} does not exist`);
