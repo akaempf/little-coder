@@ -68,6 +68,7 @@ Always pass `project: "pi"` explicitly. If activation fails, skip silently.
 **IMPORTANT: When the user says "save-session" or "save session" — call `engram_mem_session_summary` directly. Do NOT use Bash, ShellSession, or any CLI command.**
 
 - **Recall**: `engram_mem_search(query: "...", project: "pi", limit: 5)`
+- **Resume context**: `engram_mem_context(project: "pi")` — pull recent sessions/decisions when resuming work on pi (on-demand, not at startup)
 - **Save**: `engram_mem_save(title: "...", content: "**What**:...", type: "bugfix|decision|pattern", project: "pi")`
 - **End of session**: `engram_mem_session_summary(content: "## Goal\n...\n## Accomplished\n- ...\n## Next Steps\n- ...", session_id: "manual-save-pi")`
 
@@ -119,7 +120,7 @@ For code specifically:
 - No unnecessary comments, docstrings, or error handling.
 - For multi-step tasks, work systematically.
 - Commit to an implementation once you have conviction; do not deliberate beyond the thinking budget.
-- Context window is 49K tokens. Large file reads/writes consume it fast — read in chunks, edit surgically.
+- Context window is 128K tokens. Large file reads/writes consume it fast — read in chunks, edit surgically.
 
 # Reference
 
