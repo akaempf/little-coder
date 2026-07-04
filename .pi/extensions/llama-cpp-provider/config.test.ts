@@ -186,19 +186,19 @@ describe("shipped models.json", () => {
   const here = dirname(fileURLToPath(import.meta.url));
   const pkgRoot = resolve(here, "..", "..", "..");
 
-  it("registers lmstudio/local-model on http://127.0.0.1:1234/v1", () => {
+  it("registers llamacpp/qwen3.6-35b-a3b on http://127.0.0.1:11434/v1", () => {
     const result = loadProviders(pkgRoot, {});
-    const lmstudio = result.providers.lmstudio;
-    expect(lmstudio, "lmstudio provider should be present in shipped models.json").toBeDefined();
-    expect(lmstudio.baseUrl).toBe("http://127.0.0.1:1234/v1");
-    expect(lmstudio.api).toBe("openai-completions");
-    expect(lmstudio.apiKey).toBe("$LMSTUDIO_API_KEY");
-    expect(lmstudio.models.find((m) => m.id === "local-model")).toBeDefined();
+    const llamacpp = result.providers.llamacpp;
+    expect(llamacpp, "llamacpp provider should be present in shipped models.json").toBeDefined();
+    expect(llamacpp.baseUrl).toBe("http://127.0.0.1:11434/v1");
+    expect(llamacpp.api).toBe("openai-completions");
+    expect(llamacpp.apiKey).toBe("$LLAMACPP_API_KEY");
+    expect(llamacpp.models.find((m) => m.id === "qwen3.6-35b-a3b-uncensored")).toBeDefined();
   });
 
-  it("still registers llamacpp and ollama alongside lmstudio", () => {
+  it("registers only llamacpp (registry pruned to local qwen3.6-a3b)", () => {
     const result = loadProviders(pkgRoot, {});
-    expect(Object.keys(result.providers).sort()).toEqual(["llamacpp", "lmstudio", "ollama"]);
+    expect(Object.keys(result.providers).sort()).toEqual(["llamacpp"]);
   });
 });
 
