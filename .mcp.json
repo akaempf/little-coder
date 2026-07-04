@@ -264,7 +264,7 @@
         "mem_session_start",
         "mem_session_end"
       ],
-      "autoActivate": false
+      "autoActivate": true
     }
   }
 }
