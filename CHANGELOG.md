@@ -2,6 +2,174 @@
 
 All notable changes to little-coder are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and little-coder's public interface (CLI, providers, tools, skills) follows semver starting at `v0.0.1` post-rename.
 
+## [v1.9.12] — 2026-07-04
+
+### Fixed
+- **Long autonomous runs now compact *before* they overflow the context window** ([#59](https://github.com/itayinbarr/little-coder/issues/59) by [@charly1r](https://github.com/charly1r)). pi only re-evaluates auto-compaction at a *user-turn boundary* — its check runs after `agent.prompt()` fully returns, i.e. once the model stops requesting tools and goes idle. During one long autonomous run that boundary is never reached: little-coder's small models routinely chain dozens of tool-call turns before yielding, so context climbs unchecked and pi only reacts to the *overflow error* after the fact. charly1r reproduced it precisely — context growing 34k → 40k → … → 64k across many turns with no compaction until the request overflowed a 64k window. A new **`context-watchdog`** extension closes the gap: it reads live usage via pi's `getContextUsage()` at every turn boundary and, once usage crosses **80%** of the window, calls pi's `compact()` mid-run — so a single long run compacts at roughly the same point pi would have if the model had paused. Tunable via `LITTLE_CODER_COMPACT_AT_PERCENT` (percent; e.g. `70` to compact earlier); `≤0`/`≥100` or `LITTLE_CODER_NO_COMPACT_WATCHDOG=1` disable it and defer entirely to pi's end-of-run/overflow paths. It's complementary to pi's own compaction (an in-flight guard prevents double-firing) and independent of the `reserveTokens`/`keepRecentTokens` knobs, which still govern how much is summarized vs. kept verbatim.
+
+### Added
+- **The launcher's update prompt auto-continues instead of blocking, plus an in-app notice and `/update` command** ([#64](https://github.com/itayinbarr/little-coder/issues/64) by [@cndjonno](https://github.com/cndjonno)). When a newer version was published, the launcher's `Update now? [Y/n]` prompt blocked startup indefinitely waiting on input — an unattended terminal never got past it. It now **auto-continues without updating after 10 s** (configurable via `LITTLE_CODER_UPDATE_PROMPT_TIMEOUT=<seconds>`; `0`/`off`/`never` restores the old wait-forever behavior), and the prompt shows the countdown. Two follow-ups from the same request: (2) if you dismiss or time out of the launcher prompt, a one-line "update available" notice now appears **inside the running TUI** so the pending update isn't lost, and (3) a new **`/update`** command installs the latest little-coder (with `--ignore-scripts`, matching the launcher's supply-chain posture from [#50](https://github.com/itayinbarr/little-coder/issues/50)) and cleanly ends the session so you can relaunch into it — no quitting to remember the npm incantation.
+
+### Docs
+- **Guide for running little-coder inside Zed via an ACP bridge** ([#58](https://github.com/itayinbarr/little-coder/issues/58) by [@BMorgan1296](https://github.com/BMorgan1296), with [@charly1r](https://github.com/charly1r)). little-coder still ships no ACP server of its own — `--mode rpc` is pi's internal extension-UI RPC, not the Agent Client Protocol — but the community [`pi-acp`](https://github.com/svkozak/pi-acp) bridge drives it well: point pi-acp's `PI_ACP_PI_COMMAND` at the `little-coder` binary and every bundled extension/skill comes along. New [`docs/zed-acp.md`](docs/zed-acp.md) writes up the full setup (Zed `agent_servers` config + a wrapper script that starts/stops `llama-server`), generalized from BMorgan1296's working recipe. Marked explicitly as community/unofficial — a first-class ACP transport still belongs in pi upstream, where both projects would benefit.
+
+---
+
+## [v1.9.11] — 2026-06-28
+
+### Fixed
+- **The context window now re-probes when llama-swap swaps the loaded model** ([#54](https://github.com/itayinbarr/little-coder/issues/54) by [@cndjonno](https://github.com/cndjonno)). `llama-cpp-provider` probed the server's live `n_ctx` via `/props` only once at startup, so when llama-swap swapped a model under the same endpoint little-coder kept reporting the *old* window — and that's not cosmetic: the TUI readout, the read-guard, and the context-budget math all follow the registered window, so a stale value mis-sizes the budget. The extension now hooks pi's `model_select` event, re-probes `/props` whenever the active model changes to a llamacpp model, and re-registers the provider with the fresh window — with a one-line `context window updated 32k → 128k` notice so a drop like 128k → 16k can't silently mis-size things mid-task. It skips the initial selection (startup already probed), no-ops when the window is unchanged or the probe fails, and honors the existing `LITTLE_CODER_NO_CTX_PROBE=1` opt-out. Per-phase model selection (a big model for planning, a small one for implementation) is tracked separately in [#61](https://github.com/itayinbarr/little-coder/issues/61).
+
+---
+
+## [v1.9.10] — 2026-06-28
+
+### Fixed
+- **Sub-coder concurrency now defaults to 1 (serial), and `=0` is honored instead of silently ignored** ([#57](https://github.com/itayinbarr/little-coder/issues/57) by [@whateverforever](https://github.com/whateverforever), with [@charly1r](https://github.com/charly1r)). On a small local setup two sub-coders contend for the same single model server and run *slower* than one at a time, so 2 was the wrong default — it's now 1, and parallelism is opt-in via `LITTLE_CODER_SUBCODER_CONCURRENCY=2+`. Separately, `defaultConcurrency()` gated on `n > 0`, so a user who set `LITTLE_CODER_SUBCODER_CONCURRENCY=0` to force serial execution silently fell back to the default (2) instead. Explicit values are now clamped to a floor of 1, so `0` and negatives mean "serial". Both the dispatch tool and Plan Mode's research fan-out go through this one function, so Plan Mode now respects the env var too (it could generate up to 4 exploration tasks but now executes them one at a time under the default).
+- **Write is refused for Windows reserved device names (`nul`, `con`, `com1`–`com9`, `lpt1`–`lpt9`, `aux`, `prn`)** ([#60](https://github.com/itayinbarr/little-coder/issues/60) by [@charly1r](https://github.com/charly1r)). A model treating `nul` like `/dev/null` and writing to it created a literal `nul` file on Windows — backed by a reserved DOS device name, it's notoriously hard to delete. `write-guard` now blocks any write whose basename (case-insensitive, extension ignored) is a reserved device name and tells the model to pick a real filename or not write at all. Enforced on every platform, since a literal `nul`/`con` file is a mistake everywhere and a landmine the moment a POSIX-authored repo is cloned on Windows.
+- **Launcher now finds the bundled pi under bun's flat global layout** ([#56](https://github.com/itayinbarr/little-coder/issues/56) by [@kode54](https://github.com/kode54)). `bun add -g` hoists dependencies flat as siblings of the package (`…/@earendil-works/pi-coding-agent`) rather than nesting them under `little-coder/node_modules/`, so the launcher's hardcoded nested path failed and `little-coder` wouldn't start. It now tries the npm-nested path first, then the bun/flat sibling path, and the error message lists every location it checked.
+
+### Added
+- **`ctrl-h` toggles an on-screen keyboard-shortcuts panel** ([#55](https://github.com/itayinbarr/little-coder/issues/55) by [@cndjonno](https://github.com/cndjonno)). New hotkeys keep getting added (Plan Mode's `ctrl-q`, the thinking-level cycle, …) and weren't discoverable; `ctrl-h` now shows a compact, width-safe list of the keys worth knowing right below the input, and a `ctrl-h keys` hint joins the startup shortcut row. `ctrl-h` is genuinely unbound by both pi and the emacs-style editor (and not in pi's non-overridable set), so it registers with no conflict diagnostic. Because little-coder's custom shortcuts are registered with descriptions, both `ctrl-q` (plan) and `ctrl-h` (this panel) also appear automatically in pi's built-in `/hotkeys` reference.
+
+---
+
+## [v1.9.9] — 2026-06-22
+
+### Fixed
+- **Plan-mode toggle moved from `ctrl+y` to `ctrl+q` to clear a built-in shortcut conflict.** `ctrl+y` is the editor's built-in yank/paste (`tui.editor.yank`), so v1.9.8 logged an `[Extension issues]` conflict diagnostic at startup and the toggle overrode the editor's paste. The emacs-style editor claims nearly every other `ctrl+<letter>` (line motion, word/line deletes, etc.); `ctrl+q` is genuinely unbound, and because pi runs the terminal in raw mode (flow control disabled) it arrives as a clean `\x11` byte on every terminal — so the toggle works without a conflict and without shadowing any editor key. The indicator, leave-mode hint, and the startup shortcut-row CTA now read `ctrl-q`.
+
+---
+
+## [v1.9.8] — 2026-06-22
+
+### Fixed
+- **Plan-mode toggle is now `ctrl+y` instead of `alt+p`.** Many terminals (notably macOS) deliver Alt+P as the literal `π` character rather than an `ESC p` sequence, so pi's key matcher never matched and the toggle silently failed — pressing it just typed `π` into the input. `ctrl+y` is delivered as a clean control byte, is left unbound by both pi and the editor (no yank handler), and is dispatched to extension shortcuts before any editor handling, so it fires reliably. The plan-mode indicator and "leave plan mode" hint were updated to read `ctrl-y` to match.
+
+### Added
+- **A `ctrl-y plan` hint in the startup shortcut row** so the plan-mode toggle is discoverable alongside the existing `esc` / `/` / `ctrl-r` hints.
+
+---
+
+## [v1.9.7] — 2026-06-19
+
+### Security
+- **Auto-updater now passes `--ignore-scripts` to npm so a compromised package can't run arbitrary code during upgrade** ([#50](https://github.com/itayinbarr/little-coder/issues/50) by [@steverhoades](https://github.com/steverhoades)). Lifecycle scripts (`preinstall` / `install` / `postinstall`) are the entry vector that Shai Hulud-style worms (and any other npm postinstall malware) use to land code execution the moment a compromised version of little-coder or one of its transitive deps is published. The launcher's auto-update path (`bin/update-check.mjs`) now invokes `npm install -g --ignore-scripts little-coder@<latest>`, matching pi's posture upstream. The notice-only message shown on non-TTY pipelines was updated in the same change so the manual recovery command surfaces the flag too. Scoped to the auto-updater only — first-install via `install.sh` / `npm install -g little-coder` still runs scripts so playwright's chromium download (used by browser-extract-retention's live integration test) lands during onboarding; on patch upgrades the binary is already on disk from that first install, so `--ignore-scripts` is the safer default there. Two new tests pin the flag in the source (a removal in either the spawn args or the user-visible command string fails the suite).
+
+### Docs
+- **Troubleshooting entries for `--update` and the Windows ≤ v1.9.5 bootstrap caveat** ([PR #53](https://github.com/itayinbarr/little-coder/pull/53) by [@i-snyder](https://github.com/i-snyder)). Documents that `little-coder --update` forces an immediate version check bypassing the 12h cache (and the flag is stripped before pi sees argv), and that users on the broken v1.9.5 Windows updater need a one-time `npm install -g little-coder@latest` to reach v1.9.6 (after which auto-update works normally). i-snyder's follow-up to PR #52, exactly as requested in the close comment.
+
+---
+
+## [v1.9.6] — 2026-06-18
+
+### Fixed
+- **Auto-update silently failed on Windows** ([PR #52](https://github.com/itayinbarr/little-coder/pull/52) by [@i-snyder](https://github.com/i-snyder)). On Windows `npm` is `npm.cmd` (a batch-file shim), and `spawnSync("npm", …)` without `shell: true` returns `ENOENT` before npm ever launches — the user saw `✗ Update failed (npm exit null). Continuing with v1.9.x.`, where the `null` exit code was the tell that npm never ran. The launcher now invokes `npm` via `process.env.COMSPEC /c npm` on Windows (`shell: true` would also work but triggers Node 24+'s `DEP0190` deprecation warning; COMSPEC doesn't). Cross-platform behavior unchanged: POSIX still uses plain `spawnSync("npm", …)`. The failure message is also fixed — when the spawn itself fails (`result.error` is set), the launcher now surfaces `result.error.code` (e.g. `ENOENT`) instead of `result.status` (which is `null` and meaningless), so users diagnosing future spawn failures get an actionable code instead of `npm exit null`.
+
+### Added
+- **`little-coder --update` forces a fresh update check** ([PR #52](https://github.com/itayinbarr/little-coder/pull/52) by [@i-snyder](https://github.com/i-snyder)). The launcher caches the registry "latest" lookup for 12 hours; `--update` bypasses that cache and fetches fresh from npm, then either updates or prints `✓ little-coder is already up to date (v<x>)`. The flag is stripped from argv before forwarding to pi, so `little-coder --update` no longer errors with `Unknown option: --update`. Two new `shouldSkip` tests document the interaction (the flag forces a check; the notice-only mode still applies on non-TTY).
+
+### Notes for upgraders
+- No CLI-flag or public-API breakage. Windows users on v1.9.5 or earlier should manually `npm install -g little-coder@1.9.6` this once; future updates will work via the in-app prompt or `little-coder --update`.
+
+---
+
+## [v1.9.5] — 2026-06-18
+
+### Changed
+- **Dispatch tool-result panel now word-wraps wide report lines instead of truncating them** ([PR #49](https://github.com/itayinbarr/little-coder/pull/49) by [@steverhoades](https://github.com/steverhoades), closes [#48](https://github.com/itayinbarr/little-coder/issues/48) and [#51](https://github.com/itayinbarr/little-coder/issues/51)). v1.9.4 fixed the width-overflow crash by truncating each panel line to `width - 2` with an ellipsis; v1.9.5 replaces the truncation with **word-wrap** so the full sentence survives across multiple visual lines — a strictly better UX for markdown sub-coder reports than dropping the tail at char 131. The cherry-picked commit (steverhoades's authorship preserved) keeps the wrap helpers (ANSI-aware prefix extraction, long-token chunking for whitespace-free URLs/paths/base64 that would otherwise defeat word-wrap, plain-text word-wrap), and the `makeComponent.render(width)` is rebased onto v1.9.4's `width - 2` safety margin so wide-unicode chars our char-count `visibleWidth` undercounts still can't sneak past pi's strict line-width check. Inspiration for the long-token sanitizer credited in-source to [openclaw-cn's tui-formatters.ts](https://github.com/mf-yang/openclaw-cn/commit/8c822da26f0a77396107a31f09df60817bf39c98). `issue-51-repro.test.ts` updated for wrap semantics (4 cases): no emitted line exceeds; the wrapped lines round-trip to the original 134-char sentence verbatim (no data loss); narrow terminal (40 cols) survives; 200-char URL-ish tokens get chunked so wrapping has room to split.
+
+### Notes for upgraders
+- No CLI-flag or public-API changes. If you upgraded from v1.9.3 → v1.9.4 → v1.9.5, the user-visible difference between the last two is just wrap-vs-truncate in the dispatch tool's expanded report panel — both eliminate the crash. If you saw an ellipsis at the right edge of a sub-coder report on v1.9.4, you'll now see the full sentence wrapped onto the next line instead.
+
+---
+
+## [v1.9.4] — 2026-06-18
+
+### Fixed
+- **Dispatch tool-result panel overflows the terminal on wide report lines** ([#51](https://github.com/itayinbarr/little-coder/issues/51), reopen of [#48](https://github.com/itayinbarr/little-coder/issues/48)). v1.9.2 capped every line the *live* sub-coder tracker emitted, but the **dispatch tool's result renderer** (`subagent/index.ts`'s `makeComponent`) was still ignoring the `width` arg pi passes to `render(width)` — it returned the precomputed lines verbatim. pi paints the tool-result panel with a 1-char background-color left margin, so any sub-coder report sentence wider than `terminal_width - 1` overflowed pi-tui. Crash log line 453 was a 134-char markdown sentence rendered at terminal width 133 → 135 > 133. The same path runs on **`--resume`** (pi re-paints saved tool results from session history), so v1.9.2 users still hit it after upgrading whenever they resumed a session with a wide dispatch report saved — that's why @steverhoades caught the regression. `makeComponent` now truncates every emitted line to `width - 2` using the existing `_shared/width.ts` utility (2-char safety margin for wide unicode under our char-count-based `visibleWidth` approximation), so the dispatch panel can no longer crash a session — live, on resume, or anywhere else. New `subagent/issue-51-repro.test.ts` drives `makeComponent` with the user's exact 134-char content shape at width 133 and asserts no emitted line exceeds, plus a narrow-terminal (40-col) survival check.
+
+### Notes for upgraders
+- No CLI-flag or public-API changes. If you saw `Rendered line N exceeds terminal width` on v1.9.2 / 1.9.3 — especially while *resuming* a session — 1.9.4 fixes it. If you still see it after upgrading, the offending line in `~/.pi/agent/pi-crash.log` should let us spot the source; reopen #51 or #48 with the log attached.
+
+---
+
+## [v1.9.3] — 2026-06-18
+
+### Added
+- **`LITTLE_CODER_EXTRA_EXTENSIONS` env var: layer third-party pi extensions onto the bundled set without forking the installed package** ([#46](https://github.com/itayinbarr/little-coder/issues/46)). Path-delimited list (`:` on POSIX, `;` on Windows — `node:path.delimiter`) of extension paths. Each entry can be a direct file (e.g. a `pi-ponytail`-style `extensions/ponytail.js`) or a directory containing `index.ts` / `index.js` (the launcher prefers `.ts`). A leading `~/` is expanded; missing paths log a one-line warning to stderr and are skipped (a typo in the env var doesn't kill the session). Survives upgrades — drop the env var into your shell rc once and every `little-coder` run picks up the extras. Example: `LITTLE_CODER_EXTRA_EXTENSIONS=~/.local/lib/node_modules/pi-ponytail/extensions/ponytail.js little-coder`. Parsing rules live in `bin/extras.mjs` so they're unit-testable in isolation (9 cases covering direct-file / dir-index-resolution / `index.ts`-preference / missing-path warning / `~/` expansion / multiple entries / whitespace trimming). The launcher-level integration is exercised end-to-end (warning prints for a bad path; valid paths pass through silently to pi as `--extension <entry>` flags). Closest siblings — third-party skill bundles — are not yet covered; `skill-inject` still discovers only `<pkgRoot>/skills/tools/*.md`, and a follow-up will add the same kind of override.
+
+### Notes for upgraders
+- No CLI-flag or public-API changes. The new env var is opt-in: unset = identical behavior to v1.9.2. If you were carrying a custom wrapper extension inside the installed npm package (which gets wiped on upgrade), you can drop it and use the env var instead.
+
+---
+
+## [v1.9.2] — 2026-06-18
+
+### Fixed
+- **Width-overflow crash from custom widgets** ([#48](https://github.com/itayinbarr/little-coder/issues/48)). pi-tui throws `Rendered line N exceeds terminal width` whenever a custom TUI component emits a line wider than the active terminal — the user saw a 198-char line at width 184 take down the whole session. Root cause was the **sub-coder tracker** (`subagent/tracker.ts`): a failed sub-coder's `errorMessage` flowed straight into a widget row without any cap, and real-world child-process errors routinely run 150-250 chars (transport error + URL + retry count is enough). The tracker now caps every emitted row to the active terminal width using a new `_shared/width.ts` utility (`visibleWidth` + `truncateLineToWidth`, ANSI-aware so SGR colour codes are preserved through the cut and a final reset prevents bleed). `summarizeActivity` also gained a 56-char cap on the failure path (was uncapped) and the running path (was uncapped on `part.name`) for defense in depth. The same width-cap is now applied to the **plan-mode status panel**, the **plan-mode indicator**, and the **branding startup header** (which now uses the `width` arg pi passes to `render()` instead of returning hardcoded-length lines), so a narrow terminal can no longer crash launch either. New `width.test.ts` (9 cases) covers ASCII / SGR / OSC hyperlink / colour-bleed / the exact issue-48 reproduction shape, and `issue-48-repro.test.ts` drives the tracker directly with a 167-char failure at width 184 and asserts no emitted row exceeds the terminal.
+
+### Notes for upgraders
+- No CLI-flag or public-API changes. If you ever saw `Rendered line N exceeds terminal width (… > …)` crash a session — particularly during a `dispatch` call that errored, or while Plan Mode was orchestrating sub-coders — 1.9.2 fixes it. Third-party pi extensions (e.g. `context-mode`) that emit their own widgets remain subject to pi's check; if you still see the crash with `Loaded pi extensions: <name>` listed, the offending widget is in that extension, not little-coder.
+
+---
+
+## [v1.9.1] — 2026-06-08
+
+### Fixed
+- **Plan Mode shortcut moved to `alt+p` so `shift+tab` stays pi's thinking-level cycle** ([#47](https://github.com/itayinbarr/little-coder/issues/47)). v1.9.0 claimed `shift+tab` for Plan Mode by rebinding pi's built-in `app.thinking.cycle` to `alt+t` in `~/.pi/agent/keybindings.json`. That collided with the muscle memory of every existing pi user — `shift+tab` is the documented thinking cycle — and pi (≥ 0.79) also surfaced an `[Extension issues]` warning whenever the rebind hadn't taken yet. Plan Mode now registers on **`alt+p`** instead (unbound by pi, so the extension claims it cleanly with no shadowing), and `shift+tab` returns to pi's default behavior. The launcher also performs a **one-time cleanup**: on first run after upgrade, if `~/.pi/agent/keybindings.json` still has the v1.9.0 rewrite (`app.thinking.cycle: "alt+t"` exactly), it is removed; any binding you set yourself is preserved untouched. README and the Plan-Mode indicator (`(alt+p to exit)`) updated to match.
+
+### Notes for upgraders
+- No CLI-flag or public-API changes. **Plan Mode is now `alt+p`** (was `shift+tab` in v1.9.0). `shift+tab` is again pi's thinking-level cycle. If you customized `app.thinking.cycle` yourself in `~/.pi/agent/keybindings.json`, your binding is left alone.
+
+---
+
+## [v1.9.0] — 2026-06-15
+
+### Added
+- **Plan Mode (shift+tab).** A Claude-Code-style "research → ask → plan" flow, built as the new `plan-mode` extension. Press **shift+tab** to toggle it (an honey `◆ PLAN MODE` indicator appears below the input). When it's on, submitting a request does *not* run a normal coding turn — instead little-coder: (1) decomposes the request into 1-4 exploration tasks, (2) dispatches read-only explorer sub-coders to gather information (their transcripts never enter the main context — only their concise reports survive), (3) generates 1-3 clarifying questions, each with suggested answers plus a free-text "Other" option, asked via the UI, and (4) synthesizes the findings + your answers into a written plan in the chat. Each reasoning phase ("deciding what to explore…", "preparing clarifying questions…") shows an animated spinner with a running m:ss timer. The planning instructions + research are injected into the synthesis turn's system prompt, so the chat shows only your original request and the plan — never the internal scaffolding. A single continuous m:ss timer runs for the whole process (not just the per-sub-coder timers). When the plan is presented, an **Approve & implement / Keep planning** prompt (arrow keys + enter) gates implementation — only on approval does little-coder start making the changes. **Esc** (or Ctrl+C) cancels a plan in progress.
+- **Up-arrow prompt history** (`prompt-history` extension), **persisted across sessions**. pi's default editor has no prompt recall; from an empty prompt, **↑** now walks back through your recent prompts (most-recent first) and **↓** walks forward. History is saved to `<agentDir>/little-coder-prompt-history.json`, so even a brand-new session can recall prompts from earlier runs. Implemented as a `CustomEditor` subclass (pi copies its keybindings/autocomplete/submit wiring onto it) using `keybindings.matches` for ↑/↓ detection — robust to pi's Kitty keyboard protocol and key-release events — and scoped to recall-from-empty so it never interferes with multi-line cursor movement or the autocomplete dropdown. Edits/writes are blocked during the synthesis turn so plan mode produces a plan, not changes. shift+tab previously cycled the thinking level; pi (≥ 0.79) reserves built-in shortcuts and won't let an extension claim a colliding one, so the launcher rebinds the thinking-level cycle to **alt+t** in `~/.pi/agent/keybindings.json` (non-destructively — only when you haven't set your own binding for it), freeing shift+tab for Plan Mode.
+- **Sub-coders (`dispatch` tool).** little-coder can now spawn isolated child little-coder sessions to research a focused question — single (`{ task }`) or parallel (`{ tasks: [{ label, task }] }`, up to 4, concurrency 2 by default, override with `LITTLE_CODER_SUBCODER_CONCURRENCY`). Children run with the **same local-model provider and extensions** as the parent (spawned through the launcher headless, not bare `pi`) but are constrained to **read + browse-online** tools (read, grep, glob, webfetch, websearch, browser, read-only bash) — no edit/write and no recursive dispatch, enforced via the existing `tool-gating` + `permission-gate` env gates. Each child returns a **concise report**; its full transcript lives in the tool's UI-only `details` and never enters the parent model's context, keeping the main window clean. New `subagent` extension (`spawn.ts` engine, importable by plan mode).
+- **Live sub-coder tracker.** A small animated panel above the input shows each running/finished sub-coder with a spinner, status (✓/✗), elapsed time, and current activity (the latest tool call or report snippet), with a diff-guarded ~120 ms repaint. Hidden on non-interactive (benchmark/RPC) runs.
+- **Session naming + terminal title sync.** The session is auto-named from your first prompt (overridable any time with pi's `/name`), and the terminal tab title now shows the session name (`little-coder · <name>`), updating when you switch sessions with `/resume`. pi's built-in `/resume` already lists past sessions for the current directory.
+- **Read-before-edit guard.** New `read-guard-edit` extension: a file must be **Read** in the current session before it can be **Edited** — an edit to an unread file is blocked with "File must be read first before edit" and a nudge to Read it (so `old_string` matches exactly). Files you just wrote count as read. Mirrors the `write-guard` enforcement pattern.
+
+### Changed
+- **`glob` match cap lowered 500 → 100** (`extra-tools/glob.ts`) to keep results focused for small models. (`grep` was already capped at 100.)
+- **Default thinking level is now `medium`** for interactive sessions (pi's default is `minimal`) — the launcher passes `--thinking medium` unless you set a level yourself (`--thinking`, or a `--model …:<level>` shorthand) or run headless (`--mode`/`-p`).
+- **Auto-named session titles are capped at 4 words**, cut on word boundaries (no more mid-word truncation) with a trailing `…` when the prompt was longer.
+
+### Dependencies
+- **Bumped bundled pi `@earendil-works/pi-coding-agent` 0.75.3 → 0.79.4.** The "Operation aborted" marker patch (`scripts/patch-pi.mjs`) still applies cleanly to the new source (verified by `patch-pi.test.mjs`). pi 0.79 no longer hoists `@earendil-works/pi-tui` to the top level, so the `dispatch` tool's result renderers now build their lines as duck-typed components via the theme (the same pattern `branding` already uses) instead of importing pi-tui primitives — no behavior change.
+
+### Notes for upgraders
+- No breaking CLI-flag or public-API changes. **shift+tab now toggles Plan Mode** instead of cycling the thinking level — use **alt+t** for the thinking-level cycle (the launcher writes this rebinding into `~/.pi/agent/keybindings.json`, preserving any binding you've already set). New env var `LITTLE_CODER_SUBCODER_CONCURRENCY` (default 2) tunes how many sub-coders run at once against your local backend.
+
+---
+
+## [v1.8.4] — 2026-06-08
+
+### Added
+- **`output-parser` now recognizes LFM2 / Liquid "Pythonic" tool calls** ([#42](https://github.com/itayinbarr/little-coder/issues/42)). LiquidAI LFM2 models emit tool calls as a Python list wrapped in special tokens — `<|tool_call_start|>[Read(path='/a.c'), Bash(command='ls -la')]<|tool_call_end|>` — a format neither pi's native path nor the existing fenced/`<tool_call>`/bare-JSON parsers understood. New `parseLiquidToolCalls()` recovers them best-effort: single **and** double quotes, dict args (`{"k":"v"}`), list args (`['a','b']`), `True`/`False`/`None`, ints/floats, commas/parens **inside** string values, truncated tails (missing `)`/`]`/quote), the issue's exact leak shape (start token + `[` stripped, `]<|tool_call_end|><|im_end|>` trailing), and the real-world `<think>…</think>[calls]` shape — all with a precision guard so ordinary prose never trips it. Each recovered call is tagged `format: "liquid"`; the extension surfaces a single, accurate diagnostic for that format instead of the futile "use native tool calls" nudge (Pythonic *is* LFM2's native channel, so nudging would just loop). 20 new parser tests, including one built from verbatim LFM2.5-8B-A1B output.
+
+### Fixed / Documentation
+- **Diagnosed and documented the actual `Failed to parse input at pos N: …<|tool_call_end|>` failure** ([#42](https://github.com/itayinbarr/little-coder/issues/42)). The error is *server-side*: llama.cpp's `chat.cpp` tool-call parser chokes when the chat template doesn't match it — typically the GGUF's **embedded** template, which renders tools as a plain `List of tools: […]` blob without the `<|tool_list_start|>` / `<|tool_call_start|>` special tokens the parser expects. Verified end-to-end with `LiquidAI/LFM2.5-8B-A1B-Q4_K_M`: the embedded template reproduces the error and the tool never runs, while serving with `--jinja --chat-template-file LFM2-8B-A1B.jinja` (the matching template, with the special tokens) parses calls into native `tool_calls` and tools execute normally. New Troubleshooting entry with the exact fix.
+
+### Notes for upgraders
+- No CLI-flag or public-API changes. If you run an LFM2/Liquid model, serve llama.cpp with `--jinja` and the model's matching chat template (see Troubleshooting). The parser change only adds recovery + a clearer diagnostic for builds that leak the calls as text.
+
+---
+
+## [v1.8.3] — 2026-06-08
+
+### Fixed
+- **User `models.json` is now found on Windows when `HOME` is unset** ([#43](https://github.com/itayinbarr/little-coder/pull/43), thanks [@A-M-D-R-3-W](https://github.com/A-M-D-R-3-W)). Windows doesn't guarantee `HOME`, but it does set `USERPROFILE`. The documented fallback `~/.config/little-coder/models.json` was therefore skipped on Windows and user-defined models never registered. `resolveOverridePath()` now falls back to `USERPROFILE` when `HOME` is absent (resolution order is unchanged where `HOME` exists: `$LITTLE_CODER_MODELS_FILE` → `$XDG_CONFIG_HOME` → `$HOME`/`$USERPROFILE` `/.config`). Path-resolution tests are now platform-neutral via `path.join`.
+
+### Documentation
+- **Added an "Any OpenAI-compatible server (e.g. MLX / omlx)" section** to the model-configuration docs ([#40](https://github.com/itayinbarr/little-coder/issues/40)). little-coder registers providers from `models.json` rather than from pi's standalone picker extensions, so an omlx/MLX server is added by declaring a provider entry (any OpenAI-compatible `/v1` endpoint works the same way), not by installing its pi picker. The README now shows the exact `~/.config/little-coder/models.json` block.
+
+---
+
 ## [v1.8.2] — 2026-05-25
 
 ### Fixed

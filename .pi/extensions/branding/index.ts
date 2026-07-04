@@ -2,6 +2,7 @@ import type { ExtensionAPI, Theme } from "@earendil-works/pi-coding-agent";
 import { readFileSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { truncateLineToWidth } from "../_shared/width.ts";
 
 // Replace pi's built-in startup header + terminal title with little-coder
 // branding. The interactive TUI's "pi vX.Y.Z" logo, the "Pi can explain its
@@ -46,7 +47,7 @@ function readVersion(): string {
 
 const VERSION = readVersion();
 
-function buildHeader(theme: Theme): string[] {
+function buildHeader(theme: Theme, width: number): string[] {
   // Brand-book "prompt lockup" (the variant the brand reserves for terminals
   // and dark surfaces): a honey prompt caret, the wordmark in the foreground,
   // and the honey block cursor — "lc▌"'s ready-to-type punchline, applied to
@@ -65,12 +66,38 @@ function buildHeader(theme: Theme): string[] {
     `${dim("ctrl-c/ctrl-d")} clear/exit`,
     `${dim("/")} commands`,
     `${dim("!")} bash`,
+    `${dim("ctrl-q")} plan`,
+    `${dim("ctrl-h")} keys`,
   ].join(sep);
-  return ["", logo, tagline, "", hints, ""];
+  // pi-tui throws if any rendered line exceeds the terminal width (issue #48).
+  // Truncate every line we hand it so a narrow terminal can't crash the launch.
+  return ["", logo, tagline, "", hints, ""].map((l) =>
+    l ? truncateLineToWidth(l, width) : l,
+  );
 }
 
-function setTitleForCwd(setTitle: (t: string) => void, cwd: string): void {
-  setTitle(`little-coder - ${basename(cwd)}`);
+// Derive a short, human session name from the first user prompt. Returns
+// undefined when there's nothing worth naming (empty, or a command/bash line).
+// Kept pure + exported so the slug rules are unit-testable.
+export function deriveSessionName(text: string): string | undefined {
+  const trimmed = text.trim();
+  // Slash-commands and `!`-bash aren't tasks — don't name the session after them.
+  if (!trimmed || trimmed.startsWith("/") || trimmed.startsWith("!")) return undefined;
+  // First line only, first 4 words — cut on word boundaries so it never slices
+  // a word mid-way. A "…" is appended only if there were more words.
+  const firstLine = trimmed.split(/\r?\n/, 1)[0];
+  const allWords = firstLine.split(/\s+/).filter(Boolean);
+  if (allWords.length === 0) return undefined;
+  const words = allWords.slice(0, 4);
+  return allWords.length > words.length ? `${words.join(" ")}…` : words.join(" ");
+}
+
+// Title shows the session's name once it has one, else the cwd basename — so a
+// `/resume`d or `/name`d session is identifiable in the terminal tab, and
+// switching sessions updates the tab (session_start re-asserts on resume).
+function setTitle(setter: (t: string) => void, cwd: string, sessionName?: string): void {
+  const label = sessionName && sessionName.length > 0 ? sessionName : basename(cwd);
+  setter(`little-coder · ${label}`);
 }
 
 export default function (pi: ExtensionAPI) {
@@ -81,26 +108,52 @@ export default function (pi: ExtensionAPI) {
   // points (interactive-mode.js:1179, 1346, 3971), so re-setting on every
   // turn keeps our "little-coder - <cwd>" winning for the duration of a
   // session.
+  const reassertTitle = (ctx: { hasUI: boolean; cwd: string; ui: { setTitle: (t: string) => void } }) => {
+    if (!ctx.hasUI) return;
+    setTitle(ctx.ui.setTitle.bind(ctx.ui), ctx.cwd, safeGetSessionName(pi));
+  };
+
   pi.on("session_start", async (_event, ctx) => {
     if (!ctx.hasUI) return;
 
     ctx.ui.setHeader((_tui, theme) => ({
-      render(_width: number): string[] {
-        return buildHeader(theme);
+      render(width: number): string[] {
+        return buildHeader(theme, width);
       },
       invalidate() {},
     }));
 
-    setTitleForCwd(ctx.ui.setTitle.bind(ctx.ui), ctx.cwd);
+    reassertTitle(ctx);
   });
 
-  pi.on("turn_start", async (_event, ctx) => {
-    if (!ctx.hasUI) return;
-    setTitleForCwd(ctx.ui.setTitle.bind(ctx.ui), ctx.cwd);
+  // Auto-name an as-yet-unnamed session after the user's first real prompt, so
+  // it's identifiable in `/resume` and the tab title without anyone running
+  // `/name`. Only genuine interactive typing names a session — never the
+  // benchmark RPC path or programmatic follow-ups (thinking-budget nudges,
+  // plan-mode synthesis). `/name` still overrides at any time.
+  pi.on("input", async (event, ctx) => {
+    if ((event as any).source !== "interactive") return;
+    if (safeGetSessionName(pi)) return; // already named (auto or via /name)
+    const name = deriveSessionName(String((event as any).text ?? ""));
+    if (!name) return;
+    try {
+      pi.setSessionName(name);
+    } catch {
+      // older SDK without setSessionName — title still falls back to cwd
+    }
+    reassertTitle(ctx);
   });
 
-  pi.on("turn_end", async (_event, ctx) => {
-    if (!ctx.hasUI) return;
-    setTitleForCwd(ctx.ui.setTitle.bind(ctx.ui), ctx.cwd);
-  });
+  // Pi calls updateTerminalTitle() at turn boundaries (interactive-mode.js),
+  // which would clobber ours back to "π - <cwd>"; re-assert at the same points.
+  pi.on("turn_start", async (_event, ctx) => reassertTitle(ctx));
+  pi.on("turn_end", async (_event, ctx) => reassertTitle(ctx));
+}
+
+function safeGetSessionName(pi: ExtensionAPI): string | undefined {
+  try {
+    return typeof pi.getSessionName === "function" ? pi.getSessionName() : undefined;
+  } catch {
+    return undefined;
+  }
 }

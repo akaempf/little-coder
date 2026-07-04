@@ -60,6 +60,15 @@ little-coder --list-models                      # see everything pi knows about
 
 The agent uses the directory you launched it from as its working directory — `Read` / `Write` / `Edit` / `Bash` operate on your project, not on little-coder's install path.
 
+### Interactive features
+
+- **Plan Mode** — press **alt+p** to toggle (a `◆ PLAN MODE` indicator shows below the input). Submit a request and little-coder researches it with sub-coders, asks you 1-3 clarifying questions (each with suggested answers and a free-text option), then writes a plan in the chat instead of editing anything. **Esc** cancels a plan mid-run. (**shift+tab** stays pi's thinking-level cycle.)
+- **Prompt history** — from an empty input, **↑** recalls your recent prompts (most-recent first), **↓** walks forward. History persists across sessions, so a fresh session can recall prompts from earlier runs.
+- **Sub-coders (`dispatch`)** — little-coder can spawn isolated child sessions to research a question (read the repo + browse online, read-only) and report back concisely, without cluttering the main conversation. A live panel above the input tracks them. Tune parallelism with `LITTLE_CODER_SUBCODER_CONCURRENCY` (default 2).
+- **Sessions** — each session is auto-named from your first prompt (rename with `/name`) and shown in the terminal tab title. Use `/resume` to list and reopen past sessions for the current directory.
+- **Read-before-edit** — editing a file requires reading it first, so edits match the file's exact current text.
+- **Third-party extensions (`LITTLE_CODER_EXTRA_EXTENSIONS`)** — path-delimited list (`:` on POSIX, `;` on Windows) of extension paths to layer on top of the bundled set. Each entry can be a direct file (e.g. a `pi-ponytail`-style `extensions/ponytail.js`) or a directory containing `index.ts` / `index.js`. `~/` is expanded; missing paths log a warning and are skipped. Survives upgrades, no patching the installed package. Example: `LITTLE_CODER_EXTRA_EXTENSIONS=~/.local/lib/node_modules/pi-ponytail/extensions/ponytail.js little-coder`. (Single-file extensions can still use `little-coder -e <path>` for one-off loads.)
+
 For local providers (llama.cpp, Ollama, LM Studio) pi expects *some* value in the API-key env even though local servers ignore it:
 
 ```bash
@@ -99,12 +108,14 @@ build/bin/llama-server -m ~/models/Qwen3.6-35B-A3B-UD-Q4_K_M.gguf \
 
 If you only need text and want to skip the projector download, drop the second `hf download` line and the `--mmproj` flag — little-coder still works text-only, but the TUI's image attachment will be rejected by the server with a 4xx.
 
+**Context window.** `-c` sets the server's context (`-c 16384` = 16K above — a conservative default for 8 GB VRAM). little-coder **auto-detects the live `n_ctx`** from llama.cpp's `/props` at startup and registers the model with it, so whatever you pass to `-c` is what the TUI shows and budgets against — no `models.json` edit needed. To run larger, relaunch the server with e.g. `-c 131072` (128K) or `-c 262144` (256K); the KV cache grows with it, so size it to your RAM/VRAM. (`--list-models` reflects the detected window.)
+
 **Option B — Ollama** (simpler, but slower on MoE):
 
 ```bash
 curl -fsSL https://ollama.com/install.sh | sh
 ollama pull qwen3.5        # 9.7B — the paper's model
-# or: ollama pull qwen3.6-35b-a3b
+# or: ollama pull qwen3.6:35b-a3b
 ```
 
 **Option C — LM Studio** (GUI; OpenAI-compatible server on port 1234):
@@ -188,6 +199,35 @@ Then verify with `little-coder --list-models` — you should see your overridden
 
 `LLAMACPP_BASE_URL`, `OLLAMA_BASE_URL`, and `LMSTUDIO_BASE_URL` env vars still beat both files for those three providers.
 
+### Any OpenAI-compatible server (e.g. MLX / omlx)
+
+little-coder registers providers from `models.json` — it doesn't pick up pi's standalone "picker" extensions. So a server isn't added by installing its pi picker; you add it by declaring a provider. Any OpenAI-compatible endpoint works this way, including Apple's MLX server (`mlx_lm.server`, often surfaced as **omlx**). Drop this into `~/.config/little-coder/models.json` and pick it with `little-coder --model omlx/<id>`:
+
+```json
+{
+  "providers": {
+    "omlx": {
+      "api": "openai-completions",
+      "baseUrl": "http://127.0.0.1:8000/v1",
+      "apiKey": "IGNORED",
+      "models": [
+        {
+          "id": "Qwen3-32B-4bit",
+          "name": "Qwen3.6-35B-A3B (local omlx, 150K)",
+          "reasoning": true,
+          "input": ["text"],
+          "contextWindow": 150000,
+          "maxTokens": 4096,
+          "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0 }
+        }
+      ]
+    }
+  }
+}
+```
+
+Set `id` to whatever model your server reports, and `baseUrl` to its `/v1` endpoint. Verify with `little-coder --list-models`.
+
 `.pi/settings.json` is a separate concern: it controls per-model **profiles** (context_limit, thinking_budget, temperature, benchmark_overrides) referenced by the `<provider>/<id>` key. Profiles don't register or describe models — they only tune how little-coder runs against models that are already registered.
 
 ---
@@ -257,6 +297,10 @@ This is where the scaffolding work now compounds: knowledge injection/selection,
 
 ## Troubleshooting
 
+**`--update` flag** — pass `little-coder --update` to force an immediate version check, bypassing the 12-hour cache. Useful right after a release. The flag is stripped before pi sees argv so it won't produce an "Unknown option" error.
+
+**Auto-update fails on Windows (≤ v1.9.5): `npm exit null`** — the updater in those versions can't locate `npm.cmd`. Fixed in v1.9.6, but the broken updater can't deliver its own fix — run `npm install -g little-coder@latest` once to get there, then auto-update works normally.
+
 **`little-coder: command not found`** — npm's global bin directory isn't on your PATH. Run `npm config get prefix` to see where it installed; add `<prefix>/bin` to your PATH. Or reinstall with `sudo` if your prefix needs root.
 
 **`ECONNREFUSED 127.0.0.1:8888`** — llama.cpp isn't running. Start `llama-server` first, or switch `--model` to an Ollama/cloud ID.
@@ -265,9 +309,17 @@ This is where the scaffolding work now compounds: knowledge injection/selection,
 
 **Image attachment is accepted but the request returns 4xx** — your llama-server is running without a vision projector. Re-launch it with `--mmproj ~/models/mmproj-F16.gguf` (or another mmproj variant from the same GGUF repo). The `--list-models` `images` column reflects what the client *will attempt to send*, not what the server can answer; the projector is what gives the model eyes.
 
+**`Failed to parse input at pos N: SomeTool(arg='…')]<|tool_call_end|>` (LFM2 / Liquid models)** — the model is emitting its native *Pythonic* tool calls (`<|tool_call_start|>[Read(path='…')]<|tool_call_end|>`), but llama.cpp's tool-call parser is choking on them — usually because the **chat template doesn't match the parser**. The GGUF's *embedded* template often renders tools as a plain `List of tools: […]` blob without the `<|tool_list_start|>` / `<|tool_call_start|>` special tokens the parser expects. Fix: serve with `--jinja` and the model's **proper** chat template, e.g. `llama-server -m LFM2.5-8B-A1B-Q4_K_M.gguf --jinja --chat-template-file LFM2-8B-A1B.jinja` (templates ship under `llama.cpp/models/templates/`). With the matching template, llama.cpp parses the calls into native `tool_calls` and tools execute normally — verified end-to-end with LFM2.5-8B-A1B. If your build still leaks the calls as plain text, little-coder's `output-parser` recognizes the format and surfaces this same diagnostic instead of a cryptic error (issue [#42](https://github.com/itayinbarr/little-coder/issues/42)).
+
+**Context overflows on a long task before compaction kicks in** — fixed in v1.9.12. pi only re-checks compaction when the model goes *idle* at the end of a turn sequence, so a single long autonomous run (dozens of tool calls) could grow context all the way to an overflow error before that check ever ran (issue [#59](https://github.com/itayinbarr/little-coder/issues/59)). little-coder now watches context usage at every turn boundary and triggers pi's compaction mid-run once usage crosses **80 %** of the window. Tune the trigger with `LITTLE_CODER_COMPACT_AT_PERCENT=<n>` (e.g. `70` to compact earlier; values `≤0` or `≥100`, or `LITTLE_CODER_NO_COMPACT_WATCHDOG=1`, disable it and fall back to pi's end-of-run behavior). This is independent of pi's own `reserveTokens` / `keepRecentTokens`, which still govern how much is summarized vs. kept.
+
 **No API key env var warning** — pi expects *some* key even for local providers. Export `LLAMACPP_API_KEY=noop` (or `OLLAMA_API_KEY=noop`) before launching.
 
+**Update prompt hangs on launch / want it in the UI instead** — when a new version is published the launcher asks `Update now? [Y/n]` before starting. As of v1.9.12 it **auto-continues without updating after 10 s** so an unattended terminal is never blocked; tune with `LITTLE_CODER_UPDATE_PROMPT_TIMEOUT=<seconds>` (`0`/`off` waits forever). If you dismiss or time out of the prompt, little-coder still shows a one-line "update available" notice inside the TUI, and you can run **`/update`** any time to install the latest and end the session for a clean restart (issue [#64](https://github.com/itayinbarr/little-coder/issues/64)).
+
 **No pi "Update Available" banner** — that's intentional. little-coder defaults `PI_SKIP_VERSION_CHECK=1` so the bundled pi runtime doesn't nag about updating itself; little-coder pins pi to a known-good version per release. If you actually want the banner back, `export PI_SKIP_VERSION_CHECK=0` before launching.
+
+**Running little-coder from Zed's agent panel** — there's no built-in ACP server, but a community `pi-acp` bridge works well; see [docs/zed-acp.md](docs/zed-acp.md) for the full setup (issue [#58](https://github.com/itayinbarr/little-coder/issues/58)).
 
 **Extension load failures on startup** — run `little-coder --list-models --verbose`; extension errors surface there. If the install looks corrupt: `npm uninstall -g little-coder && npm install -g little-coder`.
 
@@ -299,11 +351,15 @@ The benchmarks harness (`benchmarks/`) is dev-only and not shipped with the npm 
 little-coder/
 ├── .pi/
 │   ├── settings.json               # per-model profiles + benchmark_overrides (terminal_bench, gaia)
-│   └── extensions/                 # 23 TypeScript extensions, auto-discovered by pi
-│       ├── branding/               # little-coder startup header + terminal title (replaces pi's built-in)
+│   └── extensions/                 # 27 TypeScript extensions, auto-discovered by pi
+│       ├── branding/               # little-coder startup header + terminal title + session auto-naming
+│       ├── plan-mode/              # alt+p "research → ask → plan" flow (sub-coders + clarifying questions → written plan)
+│       ├── subagent/              # `dispatch` tool: isolated read/browse-only sub-coders + live tracker (spawn.ts engine)
+│       ├── prompt-history/         # up-arrow recall of recent prompts (from an empty input)
 │       ├── llama-cpp-provider/     # data-driven provider registration from models.json — ships llamacpp, ollama, lmstudio (+ user override file)
 │       ├── write-guard/            # Write refuses on existing files; rewrites root-bare /foo.md paths to cwd
 │       ├── read-guard/             # trims a Read that would overflow the context window to its first 30 lines + a search-instead directive
+│       ├── read-guard-edit/        # Edit refuses until the file has been Read this session
 │       ├── extra-tools/            # glob, webfetch, websearch (pi ships grep/find)
 │       ├── skill-inject/           # per-turn tool-skill selection (error > recency > intent)
 │       ├── knowledge-inject/       # algorithm cheat-sheet scoring (word=1.0, bigram=2.0, threshold=2.0)

@@ -1,14 +1,18 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdtempSync, rmSync, existsSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import {
   cachePath,
   readCache,
   writeCache,
   compareSemver,
   shouldSkip,
+  promptTimeoutMs,
 } from "./update-check.mjs";
+
+const HERE = dirname(fileURLToPath(import.meta.url));
 
 describe("compareSemver", () => {
   it("orders major / minor / patch correctly", () => {
@@ -160,5 +164,54 @@ describe("shouldSkip", () => {
 
   it("returns notice-only on non-TTY pipelines", () => {
     expect(shouldSkip([], noEnv, pipeStdout())).toBe("notice-only");
+  });
+
+  it("does not skip for --update (it forces the check, not skips it)", () => {
+    expect(shouldSkip(["--update"], noEnv, ttyStdout())).toBe(false);
+  });
+
+  it("notice-only still applies with --update on non-TTY", () => {
+    expect(shouldSkip(["--update"], noEnv, pipeStdout())).toBe("notice-only");
+  });
+});
+
+describe("promptTimeoutMs (issue #64)", () => {
+  it("defaults to 10s when unset or blank", () => {
+    expect(promptTimeoutMs({})).toBe(10000);
+    expect(promptTimeoutMs({ LITTLE_CODER_UPDATE_PROMPT_TIMEOUT: "  " })).toBe(10000);
+  });
+
+  it("honors a numeric seconds override", () => {
+    expect(promptTimeoutMs({ LITTLE_CODER_UPDATE_PROMPT_TIMEOUT: "30" })).toBe(30000);
+    expect(promptTimeoutMs({ LITTLE_CODER_UPDATE_PROMPT_TIMEOUT: "1.5" })).toBe(1500);
+  });
+
+  it("treats 0 / off / never as wait-forever (no timeout)", () => {
+    expect(promptTimeoutMs({ LITTLE_CODER_UPDATE_PROMPT_TIMEOUT: "0" })).toBe(0);
+    expect(promptTimeoutMs({ LITTLE_CODER_UPDATE_PROMPT_TIMEOUT: "off" })).toBe(0);
+    expect(promptTimeoutMs({ LITTLE_CODER_UPDATE_PROMPT_TIMEOUT: "never" })).toBe(0);
+  });
+
+  it("falls back to the default on garbage / negative input", () => {
+    expect(promptTimeoutMs({ LITTLE_CODER_UPDATE_PROMPT_TIMEOUT: "soon" })).toBe(10000);
+    expect(promptTimeoutMs({ LITTLE_CODER_UPDATE_PROMPT_TIMEOUT: "-5" })).toBe(10000);
+  });
+});
+
+// Static regression for issue #50: the auto-updater must invoke npm with
+// `--ignore-scripts` so a compromised dep can't land arbitrary code via a
+// postinstall hook during upgrade (Shai Hulud-style attack vector). Source
+// grep — not a runtime exercise — because the actual spawn path is
+// interactive (prompts the user) and hard to unit-test cleanly. If someone
+// removes the flag, the grep fails and CI surfaces it.
+describe("supply-chain protection (issue #50)", () => {
+  const src = readFileSync(join(HERE, "update-check.mjs"), "utf-8");
+
+  it("passes --ignore-scripts to the actual spawn", () => {
+    expect(src).toMatch(/"install",\s*"-g",\s*"--ignore-scripts"/);
+  });
+
+  it("surfaces the flag in the user-visible command line", () => {
+    expect(src).toContain("npm install -g --ignore-scripts little-coder");
   });
 });

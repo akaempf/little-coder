@@ -12,6 +12,9 @@ import {
   propsUrlFor,
   contextWindowFromProps,
   probeContextWindow,
+  withContextWindow,
+  formatContextWindow,
+  windowChange,
   type ProviderEntry,
 } from "./config.ts";
 
@@ -37,10 +40,13 @@ describe("resolveOverridePath", () => {
     expect(resolveOverridePath({ LITTLE_CODER_MODELS_FILE: "/explicit.json", HOME: "/h" })).toBe("/explicit.json");
   });
   it("falls back to XDG_CONFIG_HOME", () => {
-    expect(resolveOverridePath({ XDG_CONFIG_HOME: "/xdg", HOME: "/h" })).toBe("/xdg/little-coder/models.json");
+    expect(resolveOverridePath({ XDG_CONFIG_HOME: "/xdg", HOME: "/h" })).toBe(join("/xdg", "little-coder", "models.json"),);
   });
   it("falls back to HOME/.config", () => {
-    expect(resolveOverridePath({ HOME: "/h" })).toBe("/h/.config/little-coder/models.json");
+    expect(resolveOverridePath({ HOME: "/h" })).toBe(join("/h", ".config", "little-coder", "models.json"),);
+  });
+  it("falls back to USERPROFILE/.config when HOME is absent", () => {
+    expect(resolveOverridePath({ USERPROFILE: "/profile" })).toBe(join("/profile", ".config", "little-coder", "models.json"),);
   });
   it("returns undefined when neither is set", () => {
     expect(resolveOverridePath({})).toBeUndefined();
@@ -370,5 +376,53 @@ describe("probeContextWindow", () => {
     const got = await probeContextWindow("http://x:8888/v1", { fetchImpl, url: "http://other/props" });
     expect(seen).toBe("http://other/props");
     expect(got).toBe(40960);
+  });
+});
+
+// ── swap-time re-probe helpers (issue #54) ──────────────────────────────────
+
+describe("withContextWindow", () => {
+  const models = [
+    fillModelDefaults({ id: "a", contextWindow: 32768 }, "llamacpp", 0),
+    fillModelDefaults({ id: "b", contextWindow: 8192 }, "llamacpp", 1),
+  ];
+  it("re-stamps every model with the new window, preserving other fields", () => {
+    const out = withContextWindow(models, 131072);
+    expect(out.map((m) => m.contextWindow)).toEqual([131072, 131072]);
+    expect(out.map((m) => m.id)).toEqual(["a", "b"]);
+    expect(out[0].cost).toEqual(models[0].cost);
+  });
+  it("does not mutate the input", () => {
+    withContextWindow(models, 999);
+    expect(models[0].contextWindow).toBe(32768);
+  });
+});
+
+describe("formatContextWindow", () => {
+  it("renders ×1024 windows as clean k labels", () => {
+    expect(formatContextWindow(131072)).toBe("128k");
+    expect(formatContextWindow(32768)).toBe("32k");
+    expect(formatContextWindow(16384)).toBe("16k");
+  });
+  it("rounds non-power-of-two windows to the nearest k", () => {
+    expect(formatContextWindow(90000)).toBe("88k");
+  });
+});
+
+describe("windowChange", () => {
+  it("returns the transition when the probed window differs", () => {
+    expect(windowChange(32768, 131072)).toEqual({ from: 32768, to: 131072 });
+  });
+  it("reports a shrink (the 128k → 16k case the notice exists for)", () => {
+    expect(windowChange(131072, 16384)).toEqual({ from: 131072, to: 16384 });
+  });
+  it("returns null when the window is unchanged", () => {
+    expect(windowChange(131072, 131072)).toBeNull();
+  });
+  it("returns null when the probe failed (undefined)", () => {
+    expect(windowChange(131072, undefined)).toBeNull();
+  });
+  it("surfaces a first-known window even when nothing was registered yet", () => {
+    expect(windowChange(undefined, 32768)).toEqual({ from: undefined, to: 32768 });
   });
 });

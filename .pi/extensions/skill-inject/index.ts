@@ -79,6 +79,9 @@ const INTENT_MAP: Record<string, string[]> = {
   engram: ["engram_mem_session_summary", "engram_mem_search"],
   recall: ["engram_mem_search"],
   remember: ["engram_mem_save"],
+  // Sub-coder delegation
+  delegate: ["dispatch"], dispatch: ["dispatch"], subagent: ["dispatch"],
+  investigate: ["dispatch"], parallel: ["dispatch"],
 };
 
 function skillsDir(): string {

@@ -1,6 +1,6 @@
 {
   "name": "little-coder",
-  "version": "1.8.2",
+  "version": "1.9.12",
   "description": "A pi-based coding agent optimized for small local language models. Reproduces the whitepaper's scaffold-model-fit adaptations as pi extensions.",
   "homepage": "https://github.com/itayinbarr/little-coder",
   "repository": {
@@ -38,7 +38,7 @@
     "postinstall": "npx patch-package && node scripts/patch-pi.mjs"
   },
   "dependencies": {
-    "@earendil-works/pi-coding-agent": "^0.77.0",
+    "@earendil-works/pi-coding-agent": "^0.79.4",
     "@sinclair/typebox": "^0.34.49",
     "playwright": "^1.59.1"
   },
