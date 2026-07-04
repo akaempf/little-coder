@@ -135,7 +135,30 @@ try {
 } catch {
   // ignore — update-check just won't fire if we can't read the version
 }
-const exitAfterCheck = await checkForUpdate(currentVersion);
+// ---- 5b. Read quietStartup to decide update-check behavior ----
+let quietStartup = false;
+try {
+  const agentDirEnv = process.env.PI_CODING_AGENT_DIR;
+  let agentDir;
+  if (agentDirEnv && agentDirEnv.trim().length > 0) {
+    agentDir = agentDirEnv === "~"
+      ? homedir()
+      : agentDirEnv.startsWith("~/")
+        ? homedir() + agentDirEnv.slice(1)
+        : agentDirEnv;
+  } else {
+    agentDir = join(homedir(), ".pi", "agent");
+  }
+  const settingsPath = join(agentDir, "settings.json");
+  if (existsSync(settingsPath)) {
+    try {
+      const parsed = JSON.parse(readFileSync(settingsPath, "utf-8"));
+      if (parsed?.quietStartup === true) quietStartup = true;
+    } catch { /* ignore */ }
+  }
+} catch { /* ignore */ }
+
+const exitAfterCheck = await checkForUpdate(currentVersion, { skip: quietStartup ? "notice-only" : false });
 if (exitAfterCheck) {
   // Successful update happened; user needs to re-run the new binary.
   process.exit(0);
