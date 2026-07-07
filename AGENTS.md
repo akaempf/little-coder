@@ -67,7 +67,8 @@ atlassian-jira_jira_get(path="/rest/api/3/search/jql", queryParams={"jql": "assi
 
 ### Memory (engram)
 
-On-demand — activates on keywords ("save-session", "remember this", "recall", etc.). No auto-injection.
+On-demand — activates on keywords ("save-session", "remember this", "recall", etc.).
+**Auto-injected at session start** by the `engram-capture` extension: recent memory context and `~/CLAUDE.md` are prepended to your system prompt on the first turn. A mandatory save reminder is injected every turn.
 Always pass `project: "pi"` explicitly. If activation fails, skip silently.
 
 **IMPORTANT: When the user says "save-session" or "save session" — call `engram_mem_session_summary` directly. Do NOT use Bash, ShellSession, or any CLI command.**
