@@ -3,15 +3,20 @@
 // for things little-coder can't express through pi's extension API.
 //
 // little-coder treats pi as a substrate it owns, not a boundary — but pi is a
-// normal npm dependency, so we can't ship a modified copy of it. Instead we
-// re-apply small source edits to the installed pi after install AND on every
-// launch (the launcher calls applyPiPatches). Running on launch makes it
-// self-heal if npm install scripts were skipped, if pi was reinstalled, or if
-// the global/hoisted layout defeated the postinstall — the launcher always
-// resolves pi's real location, so it can patch wherever pi actually lives.
+// normal npm dependency, so we can't ship a modified copy of it. Instead the
+// launcher applies small source edits to the installed pi on every launch by
+// calling applyPiPatches().
 //
-// Contract: NEVER throw, NEVER exit non-zero. A failed patch must not break
-// `npm install` or a launch — the only consequence is the un-patched UI.
+// Launch-time is the only hook there is, by design. little-coder ships NO npm
+// install scripts: a `postinstall` was the one thing tripping Socket's AI
+// malware scan (issue #75), and it was already redundant — the in-app
+// `/update` and the launcher's self-update both install with --ignore-scripts
+// (issue #50), so a postinstall never ran for anyone upgrading. Patching from
+// the launcher also means we patch wherever pi actually lives, including
+// bun's flat global layout, and it self-heals if pi is reinstalled under us.
+//
+// Contract: NEVER throw. A failed patch must not break a launch — the only
+// consequence is the un-patched UI.
 //
 // Current patches:
 //   1. Suppress pi's bare "Operation aborted" assistant-message marker. Harness
@@ -19,7 +24,7 @@
 //      and a user ESC is self-evident; the stacked red marker was noise. A
 //      genuine custom errorMessage (not the default abort string) is preserved.
 
-import { copyFileSync, readFileSync, writeFileSync, existsSync } from "node:fs";
+import { readFileSync, writeFileSync, existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createRequire } from "node:module";
@@ -30,19 +35,14 @@ const ABORT_MARKER_PATCH = {
   rel: "dist/modes/interactive/components/assistant-message.js",
   // Skip if our edit is already present (idempotency).
   applied: 'little-coder patch: suppress the bare "Operation aborted" marker',
-  // Exact original block shipped by pi 0.75.x. If it doesn't match (pi changed),
+  // Exact original block shipped by pi 0.83.x. If it doesn't match (pi changed),
   // we skip silently rather than guess.
   find:
     '                const abortMessage = message.errorMessage && message.errorMessage !== "Request was aborted"\n' +
     "                    ? message.errorMessage\n" +
     '                    : "Operation aborted";\n' +
-    "                if (hasVisibleContent) {\n" +
-    "                    this.contentContainer.addChild(new Spacer(1));\n" +
-    "                }\n" +
-    "                else {\n" +
-    "                    this.contentContainer.addChild(new Spacer(1));\n" +
-    "                }\n" +
-    "                this.contentContainer.addChild(new Text(theme.fg(\"error\", abortMessage), 1, 0));",
+    "                this.contentContainer.addChild(new Spacer(1));\n" +
+    "                this.contentContainer.addChild(new Text(theme.fg(\"error\", abortMessage), this.outputPad, 0));",
   replace:
     '                // little-coder patch: suppress the bare "Operation aborted" marker.\n' +
     "                // Harness interventions surface their own single\n" +
@@ -53,7 +53,7 @@ const ABORT_MARKER_PATCH = {
     "                    : null;\n" +
     "                if (abortMessage) {\n" +
     "                    this.contentContainer.addChild(new Spacer(1));\n" +
-    "                    this.contentContainer.addChild(new Text(theme.fg(\"error\", abortMessage), 1, 0));\n" +
+    "                    this.contentContainer.addChild(new Text(theme.fg(\"error\", abortMessage), this.outputPad, 0));\n" +
     "                }",
 };
 
@@ -83,8 +83,9 @@ export function resolvePiRoot(piRootOverride) {
 
 /**
  * Apply all pi patches in place. Best-effort and idempotent.
- * @param {string} [piRootOverride] Known pi package root (the launcher passes
- *   its already-resolved path; postinstall omits it and we resolve).
+ * @param {string} [piRootOverride] Known pi package root. The launcher passes
+ *   its already-resolved path (the layout it actually spawns); when omitted we
+ *   fall back to resolving pi ourselves.
  */
 export function applyPiPatches(piRootOverride) {
   const piRoot = resolvePiRoot(piRootOverride);
@@ -101,58 +102,4 @@ export function applyPiPatches(piRootOverride) {
       // best-effort: never break install or launch
     }
   }
-  syncNestedPiAgentCore(piRoot);
 }
-
-/**
- * npm `overrides` doesn't always deduplicate pi-agent-core inside
- * pi-coding-agent's own node_modules, so the patch-package patch applied to
- * the top-level copy never reaches the nested copy that pi-coding-agent
- * actually imports.  This function syncs the two: once the top-level copy
- * has been patched by patch-package (sentinel: contains `_steeringInterrupt`),
- * copy it over the nested copy if the nested copy is still unpatched.
- *
- * Called from applyPiPatches so it runs at postinstall AND on every launch
- * (self-healing).  Best-effort and idempotent.
- *
- * @param {string} piRoot  Resolved pi-coding-agent package root.
- */
-function syncNestedPiAgentCore(piRoot) {
-  // pi-coding-agent lives at <nm>/@earendil-works/pi-coding-agent;
-  // the top-level pi-agent-core is its sibling: <nm>/@earendil-works/pi-agent-core
-  const coreBase = join(piRoot, "..", "pi-agent-core", "dist");
-  const nestedBase = join(piRoot, "node_modules", "@earendil-works", "pi-agent-core", "dist");
-
-  // Each entry: [filename, sentinel string that proves the patch is applied]
-  const FILES = [
-    // Sentinel must be unique to the NEW patch — "_steeringInterrupt" is present
-    // in both old and new patches, so it would incorrectly skip the sync when
-    // the nested copy has only the old (no stream-abort) version of the patch.
-    ["agent-loop.js", "_activeStreamAbort"],
-    ["agent.js",      "injectSteeringMessage(message)"],
-  ];
-
-  for (const [file, sentinel] of FILES) {
-    try {
-      const topLevel = join(coreBase, file);
-      const nested   = join(nestedBase, file);
-      if (!existsSync(topLevel) || !existsSync(nested)) continue;
-      const topSrc = readFileSync(topLevel, "utf8");
-      if (!topSrc.includes(sentinel)) continue; // top-level not yet patched — skip
-      const nestedSrc = readFileSync(nested, "utf8");
-      if (nestedSrc.includes(sentinel)) continue; // nested already in sync
-      copyFileSync(topLevel, nested);
-    } catch {
-      // best-effort: never break install or launch
-    }
-  }
-}
-
-// Run directly as a postinstall hook (but not when imported by the launcher).
-let invokedDirectly = false;
-try {
-  invokedDirectly = process.argv[1] != null && fileURLToPath(import.meta.url) === process.argv[1];
-} catch {
-  invokedDirectly = false;
-}
-if (invokedDirectly) applyPiPatches();

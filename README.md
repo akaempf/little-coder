@@ -11,7 +11,11 @@ The research story behind all this — why scaffold–model fit matters, how a 9
 
 [pi](https://pi.dev) is the minimal substrate — agent loop, multi-provider API, TUI, session tree, compaction, extension model. Four built-in tools (read / write / edit / bash) and a ~1000-token system prompt.
 
-little-coder is **pi + 20 extensions + 30 skill markdown files + a Python benchmark harness**. It doesn't fork pi or shadow its CLI — pi is a plain dependency in `package.json`, and everything little-coder-specific lives under `.pi/extensions/`, `skills/`, and `benchmarks/`. The launcher runs pi with `--no-extensions` and wires in exactly the bundled set, so you add your own extension by dropping a directory into `.pi/extensions/` (or passing `little-coder -e /path/to/ext/index.ts` at launch) and remove one of ours by deleting its directory. Note this also means a globally `pi install`'d package won't load inside little-coder — `pi install` registers into pi's settings, which `--no-extensions` skips.
+little-coder is **pi + 30-odd extensions + 30 skill markdown files + a Python benchmark harness**. It doesn't fork pi or shadow its CLI — pi is a plain dependency in `package.json`, and everything little-coder-specific lives under `.pi/extensions/`, `skills/`, and `benchmarks/`. It ships **no npm install scripts**; the launcher does everything at launch time.
+
+The launcher runs pi with `--no-extensions` and wires in exactly the bundled set. That's what keeps the cold-start context around 7k tokens and makes behavior predictable — the set that loads is the set that ships, and nothing in your working directory changes it mid-task. The consequence is that a globally `pi install`'d package won't load inside little-coder by default, because `pi install` registers into pi's settings and `--no-extensions` skips those.
+
+You have three opt-in ways around that, none of which change the default: drop your own extensions in `~/.config/little-coder/extensions/`, point `LITTLE_CODER_EXTRA_EXTENSIONS` at files anywhere, or relaunch with `--with-pi-extensions` to let pi discover its own. Run `/extensions` to see what's loaded. Full guide: **[Extending little-coder](docs/extensions.md)**. (Themes are unaffected — pi themes have always loaded.)
 
 If you've never used pi, it's useful to skim [pi.dev](https://pi.dev) first — the rest of this doc assumes pi's model of `--agent-import-path`, `--mode rpc`, and `.pi/extensions/` auto-discovery.
 
@@ -43,10 +47,13 @@ That's the whole install. No clone, no `npm install` in a workspace, no PATH fid
 
 ```bash
 cd ~/your-project
-little-coder --model llamacpp/qwen3.6-35b-a3b
+little-coder                                    # launches the default model (see below)
+little-coder --model llamacpp/qwen3.6-35b-a3b   # or name one explicitly
 ```
 
 This is the canonical setup little-coder is tuned for: a local llama.cpp server hosting Qwen3.6-35B-A3B. See **[Local model setup (optional)](#local-model-setup-optional)** below for how to serve it.
+
+Bare `little-coder` (no `--model`) launches the **default model** declared in `models.json` (`"default": "llamacpp/qwen3.6-35b-a3b"` out of the box), printing its friendly name at startup. This only kicks in on a first run — once you pick a model in-session, that choice sticks and the default never overrides it. Change the default with a `default` key in your [user override file](#configuring-models). See **[Configuring models](#configuring-models)**.
 
 Cloud models work the same way:
 
@@ -62,12 +69,35 @@ The agent uses the directory you launched it from as its working directory — `
 
 ### Interactive features
 
-- **Plan Mode** — press **alt+p** to toggle (a `◆ PLAN MODE` indicator shows below the input). Submit a request and little-coder researches it with sub-coders, asks you 1-3 clarifying questions (each with suggested answers and a free-text option), then writes a plan in the chat instead of editing anything. **Esc** cancels a plan mid-run. (**shift+tab** stays pi's thinking-level cycle.)
+- **Plan Mode** — press **ctrl+q** to toggle (a `◆ PLAN MODE` indicator shows below the input), or launch with **`--plan-mode`** (`LITTLE_CODER_PLAN_MODE=1`) to start there. Submit a request and little-coder researches it with sub-coders, asks you 1-3 clarifying questions (each with suggested answers and a free-text option), then writes a plan in the chat instead of editing anything. **Esc** cancels a plan mid-run. (**shift+tab** stays pi's thinking-level cycle.)
+- **Deep Research** — press **f2** (or run `/deep-research <topic>`) to scope a topic into a research brief, fan out read-only research sub-coders, and get back one cited markdown report, saved next to your working directory. **Esc** cancels mid-run.
+- **Keyboard shortcuts** — press **ctrl+h** for a panel of the keys worth knowing; `/hotkeys` is the full reference. **ctrl+o** expands tool output ("more"), **ctrl+t** toggles thinking blocks, **ctrl+p** cycles models.
 - **Prompt history** — from an empty input, **↑** recalls your recent prompts (most-recent first), **↓** walks forward. History persists across sessions, so a fresh session can recall prompts from earlier runs.
-- **Sub-coders (`dispatch`)** — little-coder can spawn isolated child sessions to research a question (read the repo + browse online, read-only) and report back concisely, without cluttering the main conversation. A live panel above the input tracks them. Tune parallelism with `LITTLE_CODER_SUBCODER_CONCURRENCY` (default 2).
+- **Sub-coders (`dispatch`)** — little-coder can spawn isolated child sessions to research a question (read the repo + browse online, read-only) and report back concisely, without cluttering the main conversation. A live panel above the input tracks them. Sub-coders run serially by default (two of them contend for the same local model server and finish slower than one); opt into parallelism with `LITTLE_CODER_SUBCODER_CONCURRENCY=2` or more.
 - **Sessions** — each session is auto-named from your first prompt (rename with `/name`) and shown in the terminal tab title. Use `/resume` to list and reopen past sessions for the current directory.
 - **Read-before-edit** — editing a file requires reading it first, so edits match the file's exact current text.
-- **Third-party extensions (`LITTLE_CODER_EXTRA_EXTENSIONS`)** — path-delimited list (`:` on POSIX, `;` on Windows) of extension paths to layer on top of the bundled set. Each entry can be a direct file (e.g. a `pi-ponytail`-style `extensions/ponytail.js`) or a directory containing `index.ts` / `index.js`. `~/` is expanded; missing paths log a warning and are skipped. Survives upgrades, no patching the installed package. Example: `LITTLE_CODER_EXTRA_EXTENSIONS=~/.local/lib/node_modules/pi-ponytail/extensions/ponytail.js little-coder`. (Single-file extensions can still use `little-coder -e <path>` for one-off loads.)
+- **Your own extensions** — drop them in `~/.config/little-coder/extensions/` and they load on the next launch. Run **`/extensions`** to see what's loaded and where it came from. See [Extending little-coder](docs/extensions.md).
+
+### The status line
+
+The footer at the bottom of the screen looks like this:
+
+```
+↑26k ↓5.4k R447k CH99.8% 9.3%/262k (auto)          qwen3.6-35b-a3b • medium
+```
+
+| Field | Meaning |
+|---|---|
+| `↑26k` | **Cumulative** input tokens billed as fresh across the whole session — not your current context size |
+| `↓5.4k` | Cumulative output tokens generated |
+| `R447k` | Cumulative tokens **read from cache** (the prefix your server didn't have to reprocess) |
+| `W…` | Cumulative cache-**write** tokens; only shown when non-zero |
+| `CH99.8%` | Cache-hit rate of the **latest** response alone — `cacheRead / (input + cacheRead + cacheWrite)`. Not a session average, so it moves turn to turn |
+| `9.3%/262k` | Current context usage against the window size. Amber above 70%, red above 90% |
+| `(auto)` | Automatic compaction is enabled |
+| right side | Active model, and its thinking level if it's a reasoning model |
+
+A low `CH` on a long conversation means your server is reprocessing history it should have been able to reuse — worth investigating.
 
 For local providers (llama.cpp, Ollama, LM Studio) pi expects *some* value in the API-key env even though local servers ignore it:
 
@@ -170,6 +200,27 @@ User override resolution (first match wins):
 
 Merge semantics: each top-level provider key in your override file **fully replaces** the same key in the shipped `models.json`. Providers only in your file are added; providers only in the shipped file are kept. (We don't deep-merge per-model fields — you redeclare the whole provider entry, which avoids "your override silently inherited new fields from a future package release" surprises.)
 
+**Default model.** A top-level `"default": "provider/id"` key names the model bare `little-coder` launches when you don't pass `--model` and pi has no saved selection yet (shipped default: `llamacpp/qwen3.6-35b-a3b`). Your override file's `default` wins over the shipped one, so `{"default": "llamacpp/qwen3.6-27b"}` in `~/.config/little-coder/models.json` makes the dense 27B your first-run default. It's first-run-only: once you switch models in-session, pi remembers that and the default stops applying.
+
+**Community-recommended models.** The shipped `models.json` stays intentionally small and stable — it doesn't track the fast-moving world of community fine-tunes (which get re-uploaded and disappear from Hugging Face constantly). If you want to try one that's doing well in the community — e.g. `Qwen3.6-35B-A3B-REAM-192`, which topped both a community tournament and a little-coder pilot ([#63](https://github.com/itayinbarr/little-coder/issues/63)) — add it to your **own** override file rather than waiting for it to ship. Load the GGUF on your llama.cpp server, then drop an entry in `~/.config/little-coder/models.json`:
+
+```json
+{
+  "providers": {
+    "llamacpp": {
+      "api": "openai-completions",
+      "baseUrl": "http://127.0.0.1:8888/v1",
+      "apiKey": "LLAMACPP_API_KEY",
+      "models": [
+        { "id": "ream-192", "name": "Qwen3.6-35B-A3B REAM-192 (community)", "reasoning": true, "input": ["text"] }
+      ]
+    }
+  }
+}
+```
+
+Then pick it with `little-coder --model llamacpp/ream-192`. (llama.cpp serves whichever GGUF you loaded regardless of the id, so the `id` is just your handle for it.)
+
 Example — switch the llama.cpp port and bump `qwen3.6-35b-a3b` to a 150K context, leave ollama untouched:
 
 ```json
@@ -234,13 +285,20 @@ Set `id` to whatever model your server reports, and `baseUrl` to its `/v1` endpo
 
 ## Permissions
 
-little-coder gates `Bash` tool calls against a built-in safe-prefix whitelist (`ls`, `cat`, `head`, `tail`, `git log/status/diff`, `find`, `grep`, `cp`, `mv`, `mkdir`, `touch`, etc.) before pi's own confirmation flow ever sees them. `rm` and `sudo` are intentionally not on the list — add them via `LITTLE_CODER_BASH_ALLOW` per deployment if you really need them.
+little-coder gates shell tool calls — `Bash` and `ShellSession` alike — against a built-in safe-prefix whitelist (`ls`, `cat`, `head`, `tail`, `git log/status/diff`, `find`, `grep`, `cp`, `mv`, `mkdir`, `touch`, etc.) before pi's own confirmation flow ever sees them. `rm` and `sudo` are intentionally not on the list — add them via `LITTLE_CODER_BASH_ALLOW` per deployment if you really need them.
+
+Two rules beyond the prefix match, both from [#70](https://github.com/itayinbarr/little-coder/issues/70):
+
+- **Every command in a chain is judged, not just the first.** `ls && rm -rf /` is refused on the `rm`, not allowed on the `ls`.
+- **A command that writes to a file through the shell is refused**, whatever it starts with. `cat > main.py << 'EOF'` is the same write as the `Write` tool and gets the same answer — use `Write` for a new file, `Edit` for an existing one. Redirects (`>`, `>>`), `tee`, and `dd of=` all count; `2>&1` and a `>` inside quotes don't.
+
+In `accept-all` mode the whitelist is skipped, but the write guard still refuses a shell redirect that would clobber an existing file or a reserved device name — so the "small models don't rewrite whole files" guarantee holds in benchmark runs too.
 
 Two env vars control the gate:
 
 | Env var | Values | Effect |
 |---|---|---|
-| `LITTLE_CODER_PERMISSION_MODE` | `auto` *(default)* / `accept-all` / `manual` | `auto`: block any bash command not on the whitelist. `accept-all`: skip the gate entirely, every bash call passes (the benchmark runner sets this). `manual`: same as `auto` but with a different rejection message. |
+| `LITTLE_CODER_PERMISSION_MODE` | `auto` *(default)* / `accept-all` / `manual` | `auto`: block any shell command not on the whitelist. `accept-all`: skip the gate entirely, every shell call passes (the benchmark runner sets this). `manual`: same as `auto` but with a different rejection message. |
 | `LITTLE_CODER_BASH_ALLOW` | comma-separated prefixes | Extra allow-prefixes merged with the built-in list. **Trailing whitespace is meaningful**: `"make "` allows `make test` but not `makefoo`; `"make"` allows both. |
 
 Examples:
@@ -311,17 +369,25 @@ This is where the scaffolding work now compounds: knowledge injection/selection,
 
 **`Failed to parse input at pos N: SomeTool(arg='…')]<|tool_call_end|>` (LFM2 / Liquid models)** — the model is emitting its native *Pythonic* tool calls (`<|tool_call_start|>[Read(path='…')]<|tool_call_end|>`), but llama.cpp's tool-call parser is choking on them — usually because the **chat template doesn't match the parser**. The GGUF's *embedded* template often renders tools as a plain `List of tools: […]` blob without the `<|tool_list_start|>` / `<|tool_call_start|>` special tokens the parser expects. Fix: serve with `--jinja` and the model's **proper** chat template, e.g. `llama-server -m LFM2.5-8B-A1B-Q4_K_M.gguf --jinja --chat-template-file LFM2-8B-A1B.jinja` (templates ship under `llama.cpp/models/templates/`). With the matching template, llama.cpp parses the calls into native `tool_calls` and tools execute normally — verified end-to-end with LFM2.5-8B-A1B. If your build still leaks the calls as plain text, little-coder's `output-parser` recognizes the format and surfaces this same diagnostic instead of a cryptic error (issue [#42](https://github.com/itayinbarr/little-coder/issues/42)).
 
-**Context overflows on a long task before compaction kicks in** — fixed in v1.9.12. pi only re-checks compaction when the model goes *idle* at the end of a turn sequence, so a single long autonomous run (dozens of tool calls) could grow context all the way to an overflow error before that check ever ran (issue [#59](https://github.com/itayinbarr/little-coder/issues/59)). little-coder now watches context usage at every turn boundary and triggers pi's compaction mid-run once usage crosses **80 %** of the window. Tune the trigger with `LITTLE_CODER_COMPACT_AT_PERCENT=<n>` (e.g. `70` to compact earlier; values `≤0` or `≥100`, or `LITTLE_CODER_NO_COMPACT_WATCHDOG=1`, disable it and fall back to pi's end-of-run behavior). This is independent of pi's own `reserveTokens` / `keepRecentTokens`, which still govern how much is summarized vs. kept.
+**Context overflows on a long task before compaction kicks in** — fixed in v1.9.12. pi only re-checks compaction when the model goes *idle* at the end of a turn sequence, so a single long autonomous run (dozens of tool calls) could grow context all the way to an overflow error before that check ever ran (issue [#59](https://github.com/itayinbarr/little-coder/issues/59)). little-coder now watches context usage at every turn boundary and triggers pi's compaction mid-run once usage crosses **80 %** of the window. Tune the trigger with `LITTLE_CODER_COMPACT_AT_PERCENT=<n>` (e.g. `70` to compact earlier; values `≤0` or `≥100`, or `LITTLE_CODER_NO_COMPACT_WATCHDOG=1`, disable it and fall back to pi's end-of-run behavior). This is independent of pi's own `reserveTokens` / `keepRecentTokens`, which still govern how much is summarized vs. kept. As of v1.11.0 the watchdog also **guards against a compaction loop** (issue [#68](https://github.com/itayinbarr/little-coder/issues/68)): if a mid-run compaction frees too little (usage stays near the threshold, e.g. a context window too small for the task), it **pauses automatic compaction with a notice** instead of firing a doomed second compaction that pi would reject with `Nothing to compact` — which previously left the session unrecoverable. It re-arms once usage drops back below the threshold (a `/clear`, `/compact`, or a smaller turn). If you hit the pause a lot, the real fix is a larger-context model or `-c` window.
 
 **No API key env var warning** — pi expects *some* key even for local providers. Export `LLAMACPP_API_KEY=noop` (or `OLLAMA_API_KEY=noop`) before launching.
 
-**Update prompt hangs on launch / want it in the UI instead** — when a new version is published the launcher asks `Update now? [Y/n]` before starting. As of v1.9.12 it **auto-continues without updating after 10 s** so an unattended terminal is never blocked; tune with `LITTLE_CODER_UPDATE_PROMPT_TIMEOUT=<seconds>` (`0`/`off` waits forever). If you dismiss or time out of the prompt, little-coder still shows a one-line "update available" notice inside the TUI, and you can run **`/update`** any time to install the latest and end the session for a clean restart (issue [#64](https://github.com/itayinbarr/little-coder/issues/64)).
+**Update prompt hangs on launch / want it in the UI instead** — when a new version is published the launcher asks `Update now? [Y/n]` before starting. As of v1.9.12 it **auto-continues without updating after 10 s** so an unattended terminal is never blocked; tune with `LITTLE_CODER_UPDATE_PROMPT_TIMEOUT=<seconds>` (`0`/`off` waits forever). If you dismiss or time out of the prompt, little-coder still shows a one-line "update available" notice inside the TUI, and you can run **`/update`** any time to install the latest and end the session for a clean restart (issue [#64](https://github.com/itayinbarr/little-coder/issues/64)). As of v1.11.0, answering `Y` at the launcher prompt **auto-relaunches into the new version** with your original arguments (issue [#66](https://github.com/itayinbarr/little-coder/issues/66)) — no manual re-run — printing `Relaunching little-coder…` (with a manual-relaunch fallback if the re-exec can't start). The in-app `/update` still ends the session for a manual restart, since it runs inside the pi child process where an in-place re-exec isn't safe.
 
 **No pi "Update Available" banner** — that's intentional. little-coder defaults `PI_SKIP_VERSION_CHECK=1` so the bundled pi runtime doesn't nag about updating itself; little-coder pins pi to a known-good version per release. If you actually want the banner back, `export PI_SKIP_VERSION_CHECK=0` before launching.
 
 **Running little-coder from Zed's agent panel** — there's no built-in ACP server, but a community `pi-acp` bridge works well; see [docs/zed-acp.md](docs/zed-acp.md) for the full setup (issue [#58](https://github.com/itayinbarr/little-coder/issues/58)).
 
-**Extension load failures on startup** — run `little-coder --list-models --verbose`; extension errors surface there. If the install looks corrupt: `npm uninstall -g little-coder && npm install -g little-coder`.
+**Extension load failures on startup** — run **`/extensions`** inside the TUI: it lists what loaded, where each one came from, and anything that failed. A user extension that can't be resolved also raises a notification at session start. `little-coder --list-models --verbose` surfaces pi's own load errors. If the install looks corrupt: `npm uninstall -g little-coder && npm install -g little-coder`.
+
+**My pi extensions / themes don't load** — themes do load; extensions don't, by default. `--no-extensions` gates extensions only, so pi themes in `~/.pi/agent/themes` work as normal. For extensions, relaunch with `--with-pi-extensions`, or put your own in `~/.config/little-coder/extensions/`. See [docs/extensions.md](docs/extensions.md) (issue [#67](https://github.com/itayinbarr/little-coder/issues/67)).
+
+**A malware alert on `npm install -g little-coder`** — Socket's AI scanner flagged the `postinstall` script in v1.10.0/v1.11.0 as suspicious. It was a false positive on a visible, dependency-free patcher, but as of **v1.12.0 little-coder ships no install scripts at all** — the launcher does that work at launch time instead, which is also the only path that ever ran for upgrading users, since `/update` installs with `--ignore-scripts` (issues [#75](https://github.com/itayinbarr/little-coder/issues/75), [#50](https://github.com/itayinbarr/little-coder/issues/50)).
+
+**`ctrl+r` does nothing** — it isn't bound at the prompt; pi binds "expand / more" to **`ctrl+o`**. Versions up to v1.11.0 advertised `ctrl-r` in the startup header, which was simply wrong (issue [#74](https://github.com/itayinbarr/little-coder/issues/74)). Press `ctrl+h` for the current key list, or `/hotkeys` for the full reference. Note that during a Deep Research run there is nothing for `ctrl+o` to expand: research sub-coders are separate child processes, so their tool output never enters this session's transcript — the progress bar is the view of that work. While a dialog is open (the max-agents or clarifying-question prompts), keys belong to the dialog.
+
+**llama.cpp reprocesses the whole conversation every turn** — fixed in v1.12.0. little-coder's per-turn skill and knowledge blocks used to be appended to the *system prompt*, which sits at the front of every request, so changing them invalidated the entire cached prefix and your server re-read the full history (issue [#73](https://github.com/itayinbarr/little-coder/issues/73)). Those blocks now arrive as a message at the end of the conversation instead, leaving the prefix byte-identical. Watch the `CH` field in the status line to confirm cache reuse. `LITTLE_CODER_INJECT_MODE=system` restores the old placement, which is what the whitepaper scaffold numbers were measured against.
 
 **Node version too old** — little-coder needs Node ≥ 22.19.0 (matching the minimum of the bundled `@earendil-works/pi-coding-agent` v0.75+). Check with `node --version`. Easiest fix: `nvm install 22 && nvm use 22`.
 

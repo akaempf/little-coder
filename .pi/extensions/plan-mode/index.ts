@@ -10,6 +10,7 @@ import { SubCoderTracker } from "../subagent/tracker.ts";
 import { currentModelId } from "../subagent/index.ts";
 import { PlanStatus } from "./status.ts";
 import { terminalColumns, truncateLineToWidth } from "../_shared/width.ts";
+import { injectionResult } from "../_shared/inject.ts";
 
 // Plan Mode — a Claude-Code-style "research, ask, then plan" flow.
 //
@@ -65,6 +66,17 @@ function indicatorLines(): string[] {
 function setIndicator(ctx: any, on: boolean): void {
   if (!ctx?.hasUI) return;
   ctx.ui.setWidget(INDICATOR_KEY, on ? indicatorLines() : undefined, { placement: "belowEditor" });
+}
+
+// Whether the session should open already in plan mode (issue #84). Set by the
+// launcher when `--plan-mode` (or LITTLE_CODER_PLAN_MODE=1) is passed. Honored
+// for interactive sessions only — never a headless `--mode`/`-p` run or a
+// read-only sub-coder, which inherit the parent's env but must not plan.
+export function wantsPlanModeAtStart(): boolean {
+  if (process.env.LITTLE_CODER_PLAN_MODE !== "1") return false;
+  if (process.env.LITTLE_CODER_SUBAGENT === "1") return false;
+  const argv = process.argv;
+  return !argv.includes("--mode") && !argv.includes("-p");
 }
 
 // Pull the first balanced JSON array out of a model reply (small models love to
@@ -312,9 +324,11 @@ export default function (pi: ExtensionAPI) {
     return { action: "handled" as const };
   });
 
-  // Inject the planning instructions + research into the synthesis turn's
-  // system prompt, so the chat shows only the user's original request and the
-  // model's plan — never the verbose internal instructions.
+  // Inject the planning instructions + research into the synthesis turn, kept
+  // out of the visible chat so it shows only the user's original request and
+  // the model's plan — never the verbose internal instructions. Delivered as a
+  // hidden tail message rather than a system-prompt append so the cached
+  // prefix survives the turn (issue #73 — see _shared/inject.ts).
   pi.on("before_agent_start", async (event) => {
     if (!pendingSynthesis) return;
     const { digest, answers } = pendingSynthesis;
@@ -327,7 +341,7 @@ export default function (pi: ExtensionAPI) {
       `create files.\n\n` +
       `### Research findings\n${digest}\n\n` +
       `### User's answers to clarifying questions\n${answers}`;
-    return { systemPrompt: ((event as any).systemPrompt ?? "") + block };
+    return injectionResult("lc-plan", block, (event as any).systemPrompt ?? "");
   });
 
   // While synthesizing the plan, block any attempt to edit/write files.
@@ -373,15 +387,17 @@ export default function (pi: ExtensionAPI) {
     }
   });
 
-  // A new/resumed session resets all plan-mode state.
+  // A new/resumed session resets all plan-mode state. It opens in plan mode when
+  // launched with --plan-mode / LITTLE_CODER_PLAN_MODE=1 (issue #84), otherwise
+  // off as before; ctrl+q still toggles from there.
   pi.on("session_start", async (_event, ctx) => {
-    planModeOn = false;
     orchestrating = false;
     planGuardActive = false;
     synthesisActive = false;
     pendingSynthesis = null;
     if (currentAbort) currentAbort.abort();
     currentAbort = null;
-    setIndicator(ctx, false);
+    planModeOn = wantsPlanModeAtStart();
+    setIndicator(ctx, planModeOn);
   });
 }

@@ -18,6 +18,42 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { checkForUpdate } from "./update-check.mjs";
 import { parseExtraExtensions } from "./extras.mjs";
+import { discoverUserExtensions } from "./user-extensions.mjs";
+import { resolveConfiguredDefault, decideDefaultModel } from "./default-model.mjs";
+
+// Resolve pi's agent directory (where it persists settings.json / keybindings).
+// Honors PI_CODING_AGENT_DIR (with ~ expansion), else ~/.pi/agent. Shared by the
+// default-model detection (issue #65) and the global-settings merge below.
+function resolveAgentDir() {
+  const agentDirEnv = process.env.PI_CODING_AGENT_DIR;
+  if (agentDirEnv && agentDirEnv.trim().length > 0) {
+    if (agentDirEnv === "~") return homedir();
+    if (agentDirEnv.startsWith("~/")) return homedir() + agentDirEnv.slice(1);
+    return agentDirEnv;
+  }
+  return join(homedir(), ".pi", "agent");
+}
+
+// Best-effort JSON read: returns the parsed object or undefined on any failure.
+function readJsonSafe(path) {
+  try {
+    return JSON.parse(readFileSync(path, "utf-8"));
+  } catch {
+    return undefined;
+  }
+}
+
+// User models.json override path, mirroring llama-cpp-provider/config.ts's
+// resolution order (LITTLE_CODER_MODELS_FILE → XDG → ~/.config).
+function resolveUserModelsPath() {
+  if (process.env.LITTLE_CODER_MODELS_FILE) return process.env.LITTLE_CODER_MODELS_FILE;
+  if (process.env.XDG_CONFIG_HOME) {
+    return join(process.env.XDG_CONFIG_HOME, "little-coder", "models.json");
+  }
+  const home = process.env.HOME || process.env.USERPROFILE;
+  if (home) return join(home, ".config", "little-coder", "models.json");
+  return undefined;
+}
 
 // ---- 1. Node version preflight (>= 22.19.0, matching pi.dev) ----
 const MIN_NODE = [22, 19, 0];
@@ -70,10 +106,11 @@ const piPkgCandidates = [
   join(dirname(pkgRoot), "@earendil-works", "pi-coding-agent"),
 ];
 let piEntry;
-// piPkgRoot: the resolved pi package root. Module-scoped on purpose — the
-// launch-time patch self-heal (step 3b) and the bundled-pi-version read
-// (step 8) both reach it. Upstream's multi-candidate loop (issue #56) made the
-// iteration variable block-scoped, so capture the winning candidate here.
+// The pi package root that `piEntry` came from. Declared out here on purpose:
+// two later steps need it (the runtime patcher at step 3b and the
+// lastChangelogVersion pin at step 8), and a `for (const … of …)` binding is
+// scoped to the loop body — referencing it below would throw a ReferenceError
+// that the surrounding try/catch would swallow, silently disabling both.
 let piPkgRoot;
 let piResolveErr;
 for (const candidateRoot of piPkgCandidates) {
@@ -102,11 +139,14 @@ if (!piEntry) {
   process.exit(1);
 }
 
-// ---- 3b. Re-apply little-coder's pi-runtime patches (best-effort) ----
-// pi is a normal dependency, so we can't ship a modified copy; instead we
-// re-apply small source edits (e.g. suppressing pi's bare "Operation aborted"
-// marker) on every launch. This self-heals when npm install scripts were
-// skipped or pi was reinstalled. Cosmetic only — never block launch.
+// ---- 3b. Apply little-coder's pi-runtime patches (best-effort) ----
+// pi is a normal dependency, so we can't ship a modified copy; instead we apply
+// small source edits (e.g. suppressing pi's bare "Operation aborted" marker) on
+// every launch. This is the ONLY place patching happens — little-coder ships no
+// npm install scripts (issue #75), and `/update` installs with --ignore-scripts
+// anyway (issue #50), so launch-time is the only moment that reliably runs.
+// Patching here also self-heals if pi was reinstalled under us. The patcher is
+// idempotent and swallows its own errors; this is cosmetic — never block launch.
 try {
   const { applyPiPatches } = await import("../scripts/patch-pi.mjs");
   applyPiPatches(piPkgRoot);
@@ -114,44 +154,26 @@ try {
   // patches are non-essential; ignore (missing file, read-only FS, etc.)
 }
 
-// ---- 4. Auto-discover bundled + user extensions ----
-const extDirs = [
-  join(pkgRoot, ".pi", "extensions"),
-  join(homedir(), ".pi", "agent", "extensions"),
-];
+// ---- 4. Auto-discover bundled extensions ----
+// Load order matters: bundled first, then the env var, then the user
+// directory. pi applies later `--extension` flags after earlier ones, so a
+// user extension can override bundled behavior rather than being shadowed by
+// it. The three sources are recorded in LITTLE_CODER_EXTENSION_MANIFEST below
+// so the `/extensions` command can tell the user where each one came from.
+const extDir = join(pkgRoot, ".pi", "extensions");
 const extArgs = [];
-for (const extDir of extDirs) {
-  if (existsSync(extDir)) {
-    for (const name of readdirSync(extDir).sort()) {
-      const subdir = join(extDir, name);
-      try {
-        if (!statSync(subdir).isDirectory()) continue;
-        const pkgPath = join(subdir, "package.json");
-        if (existsSync(pkgPath)) {
-          try {
-            const manifest = JSON.parse(readFileSync(pkgPath, "utf-8"));
-            const entries = manifest?.pi?.extensions;
-            if (Array.isArray(entries) && entries.length > 0) {
-              for (const entry of entries) {
-                const resolved = join(subdir, entry);
-                if (existsSync(resolved)) {
-                  extArgs.push("--extension", resolved);
-                }
-              }
-              continue;
-            }
-          } catch { /* invalid package.json, fall through */ }
-        }
-        const idxTs = join(subdir, "index.ts");
-        const idxJs = join(subdir, "index.js");
-        if (existsSync(idxTs)) {
-          extArgs.push("--extension", idxTs);
-        } else if (existsSync(idxJs)) {
-          extArgs.push("--extension", idxJs);
-        }
-      } catch {
-        // skip unreadable entries
+const loadedBundled = [];
+if (existsSync(extDir)) {
+  for (const name of readdirSync(extDir).sort()) {
+    const subdir = join(extDir, name);
+    const idx = join(subdir, "index.ts");
+    try {
+      if (statSync(subdir).isDirectory() && existsSync(idx)) {
+        extArgs.push("--extension", idx);
+        loadedBundled.push(idx);
       }
+    } catch {
+      // skip unreadable entries
     }
   }
 }
@@ -165,11 +187,53 @@ for (const extDir of extDirs) {
 // Parsing rules — ~/ expansion, directory-with-index resolution, one-line
 // warning for missing/unusable entries — live in ./extras.mjs so they're
 // unit-testable in isolation.
+const loadedFromEnv = [];
 {
   const { entries, warnings } = parseExtraExtensions(process.env.LITTLE_CODER_EXTRA_EXTENSIONS);
   for (const w of warnings) console.error(w);
-  for (const entry of entries) extArgs.push("--extension", entry);
+  for (const entry of entries) {
+    extArgs.push("--extension", entry);
+    loadedFromEnv.push(entry);
+  }
 }
+
+// ---- 4c. User extension directory (issues #67, #69) ----
+// ~/.config/little-coder/extensions (or $LITTLE_CODER_EXTENSIONS_DIR). Loaded
+// if it exists, ignored if it doesn't — an install that never creates it
+// behaves exactly as before. This is the discoverable version of 4b: no env
+// var to remember, and it survives `npm install -g little-coder@latest`.
+const loadedFromUserDir = [];
+let userExtensionsDir;
+let userExtensionWarnings = [];
+{
+  const discovered = discoverUserExtensions(process.env);
+  userExtensionsDir = discovered.dir;
+  userExtensionWarnings = discovered.warnings;
+  for (const w of discovered.warnings) console.error(w);
+  for (const entry of discovered.entries) {
+    extArgs.push("--extension", entry);
+    loadedFromUserDir.push(entry);
+  }
+}
+
+// ---- 4d. Opt-in pi-ecosystem bridge (issue #67) ----
+// Off by default, deliberately. `--no-extensions` is why "exactly this set
+// loads" holds, and that predictability is a feature on small models. But
+// wanting the pi ecosystem too is legitimate, so it's one flag away: with it,
+// pi discovers its own extensions from ~/.pi/agent/extensions and
+// <cwd>/.pi/extensions as it normally would. Project-local extensions still go
+// through pi's own trust prompt before anything runs.
+const withPiExtensions =
+  process.argv.includes("--with-pi-extensions") || process.env.LITTLE_CODER_PI_EXTENSIONS === "1";
+
+// Start the interactive session already in plan mode (issue #84). The flag is
+// stripped from the args forwarded to pi (below); the plan-mode extension reads
+// LITTLE_CODER_PLAN_MODE from the env at session_start. Not for sub-coder runs,
+// which set their own args and must not inherit plan mode.
+const startInPlanMode =
+  !isSubagent &&
+  (process.argv.includes("--plan-mode") || process.env.LITTLE_CODER_PLAN_MODE === "1");
+if (startInPlanMode) process.env.LITTLE_CODER_PLAN_MODE = "1";
 
 // ---- 5. Update check (best-effort, blocks on TTY prompt only) ----
 let currentVersion = "0.0.0";
@@ -211,19 +275,63 @@ if (!isSubagent) {
     skip: quietStartup && !forceUpdate ? "notice-only" : undefined,
   });
   if (exitAfterCheck) {
-    // Successful update happened; user needs to re-run the new binary.
-    process.exit(0);
+    // A successful update just replaced the on-disk launcher with the new
+    // version. Instead of exiting and making the user re-type `little-coder`
+    // (issue #66), re-exec THIS same launcher path under the current Node — the
+    // file on disk is now the updated one, so it loads the new code — passing
+    // the user's original args through so they land straight in the new
+    // version. We add --no-update-check so the child doesn't re-poll the
+    // registry (it's already the latest), which also rules out any relaunch
+    // loop. Best-effort: if the re-exec can't start, we fall back to exiting
+    // with the manual-relaunch hint that checkForUpdate already printed.
+    const passthrough = process.argv
+      .slice(2)
+      .filter((a) => a !== "--update" && a !== "--no-update-check");
+    process.stderr.write("   Relaunching little-coder…\n\n");
+    try {
+      const relaunch = spawn(
+        process.execPath,
+        [process.argv[1], "--no-update-check", ...passthrough],
+        { stdio: "inherit", cwd: process.cwd(), env: process.env },
+      );
+      relaunch.on("exit", (code, signal) => {
+        if (signal) process.kill(process.pid, signal);
+        else process.exit(code ?? 0);
+      });
+      relaunch.on("error", (err) => {
+        process.stderr.write(
+          `   Could not relaunch automatically (${err.message}). ` +
+            "Run `little-coder` to start the new version.\n",
+        );
+        process.exit(0);
+      });
+    } catch (err) {
+      process.stderr.write(
+        `   Could not relaunch automatically (${err?.message ?? err}). ` +
+          "Run `little-coder` to start the new version.\n",
+      );
+      process.exit(0);
+    }
+    // Do not fall through to spawning pi from the just-replaced (old) process;
+    // the relaunched child owns the session now.
+  } else {
+    // no update — continue into the normal launch path below
   }
 }
 
 // ---- 6. Compose pi argv ----
 // --no-context-files : ignore the user's AGENTS.md / CLAUDE.md so OURS wins
-// --no-extensions    : skip pi's auto-discovery from cwd; explicit -e flags still load
+// --no-extensions    : skip pi's auto-discovery from cwd; explicit -e flags still
+//                      load. Omitted when --with-pi-extensions is on (step 4d).
 // --system-prompt    : load <pkgRoot>/AGENTS.md regardless of cwd
 //
 // Strip our own flags before forwarding to pi so it doesn't reject them.
 const userArgs = process.argv.slice(2).filter(
-  (a) => a !== "--no-update-check" && a !== "--update",
+  (a) =>
+    a !== "--no-update-check" &&
+    a !== "--update" &&
+    a !== "--with-pi-extensions" &&
+    a !== "--plan-mode",
 );
 const agentsMd = join(pkgRoot, "AGENTS.md");
 
@@ -237,14 +345,67 @@ const userPickedThinking =
 const headless = isSubagent || userArgs.includes("--mode") || userArgs.includes("-p");
 const thinkingArgs = !userPickedThinking && !headless ? ["--thinking", "medium"] : [];
 
+// ---- 6b. Default model on bare launch (issue #65) ----
+// If models.json declares a top-level "default": "provider/id" and the user
+// neither passed their own --model nor already has a pi-persisted model
+// selection, inject that default so `little-coder` with no args just works, and
+// print the model's friendly name. First-run-only: once the user picks a model
+// in-session (pi persists defaultProvider/defaultModel), we never override it.
+// Skipped for headless/sub-coder runs, which set their own model. Best-effort:
+// any read/parse failure just leaves pi's own selection behavior unchanged.
+const defaultModelArgs = [];
+try {
+  const configuredDefault = resolveConfiguredDefault(
+    readJsonSafe(join(pkgRoot, "models.json")),
+    (() => {
+      const p = resolveUserModelsPath();
+      return p ? readJsonSafe(p) : undefined;
+    })(),
+  );
+  const decision = decideDefaultModel({
+    configuredDefault,
+    argv: userArgs,
+    piSettings: readJsonSafe(join(resolveAgentDir(), "settings.json")),
+    headless,
+  });
+  if (decision) {
+    defaultModelArgs.push("--model", decision.ref);
+    process.stderr.write(`   ▸ default model: ${decision.name}  (${decision.ref})\n`);
+  }
+} catch {
+  // never block launch over default-model resolution
+}
+
+if (withPiExtensions && !isSubagent) {
+  process.stderr.write(
+    "   ▸ pi extension discovery enabled — pi's own extensions from ~/.pi/agent and\n" +
+      "     ./.pi will load alongside little-coder's. The lean, fixed extension set\n" +
+      "     (and its small cold-start context) no longer applies.\n",
+  );
+}
+
 const piArgs = [
   "--no-context-files",
-  "--no-extensions",
+  ...(withPiExtensions ? [] : ["--no-extensions"]),
   ...(existsSync(agentsMd) ? ["--system-prompt", agentsMd] : []),
   ...thinkingArgs,
+  ...defaultModelArgs,
   ...extArgs,
   ...userArgs,
 ];
+
+// Hand the extension inventory to the `/extensions` command inside the TUI.
+// The launcher is the only place that knows where each path came from — pi
+// sees an undifferentiated list of --extension flags.
+process.env.LITTLE_CODER_EXTENSION_MANIFEST = JSON.stringify({
+  bundled: loadedBundled,
+  env: loadedFromEnv,
+  user: loadedFromUserDir,
+  userDir: userExtensionsDir ?? null,
+  userDirExists: Boolean(userExtensionsDir && existsSync(userExtensionsDir)),
+  warnings: userExtensionWarnings,
+  piDiscovery: withPiExtensions,
+});
 
 // ---- 7. Suppress pi's own version-banner by default ----
 // pi is an internal dependency here; users install `little-coder` and shouldn't
@@ -285,17 +446,7 @@ if (process.env.PI_SKIP_VERSION_CHECK === undefined) {
 // Skipped for headless sub-coders: they share the user's settings (already
 // written by the interactive parent) and shouldn't each re-do the merge.
 if (!isSubagent) try {
-  const agentDirEnv = process.env.PI_CODING_AGENT_DIR;
-  let agentDir;
-  if (agentDirEnv && agentDirEnv.trim().length > 0) {
-    agentDir = agentDirEnv === "~"
-      ? homedir()
-      : agentDirEnv.startsWith("~/")
-        ? homedir() + agentDirEnv.slice(1)
-        : agentDirEnv;
-  } else {
-    agentDir = join(homedir(), ".pi", "agent");
-  }
+  const agentDir = resolveAgentDir();
   mkdirSync(agentDir, { recursive: true });
   const globalSettingsPath = join(agentDir, "settings.json");
   let globalSettings = {};

@@ -43,6 +43,28 @@ describe("assessResponse", () => {
     const prev = [{ name: "Read", input: { file_path: "/b" } }];
     expect(assessResponse("", now, prev, known)).toEqual({ ok: true });
   });
+  it("does not flag a re-run build command when the prior turn also edited a file (#81)", () => {
+    const build = { name: "Bash", input: { command: "npm run build" } };
+    const now = [build];
+    // Prior turn: fixed a source file AND ran the build — re-running the build
+    // now is progress, not a loop, because the Edit changed the environment.
+    const prev = [{ name: "Edit", input: { file_path: "/src/main.ts" } }, build];
+    expect(assessResponse("", now, prev, known)).toEqual({ ok: true });
+  });
+  it("still flags a verbatim repeat when nothing else changed", () => {
+    const build = { name: "Bash", input: { command: "npm run build" } };
+    expect(assessResponse("", [build], [build], known)).toEqual({
+      ok: false, reason: "repeated_tool_call",
+    });
+  });
+  it("still flags a repeat when the only other calls are read-only (#81)", () => {
+    const build = { name: "Bash", input: { command: "npm run build" } };
+    const now = [build];
+    const prev = [{ name: "Read", input: { file_path: "/log" } }, build];
+    expect(assessResponse("", now, prev, known)).toEqual({
+      ok: false, reason: "repeated_tool_call",
+    });
+  });
   it("detects malformed args sentinel", () => {
     const calls = [{ name: "Read", input: { _raw: "garbage" } }];
     expect(assessResponse("", calls, [], known)).toEqual({
@@ -134,6 +156,40 @@ describe("quality-monitor turn_end", () => {
   it("passes a normal text turn without intervention", async () => {
     await fire(h, "turn_end", {
       message: { stopReason: "stop", content: [{ type: "text", text: "done." }] },
+    });
+    expect(h.followUps).toHaveLength(0);
+    expect(h.notifies).toHaveLength(0);
+  });
+
+  it("does not steer an empty-response correction on a provider error turn (#86)", async () => {
+    // A 400 from the backend arrives as stopReason "error" with empty content.
+    // It must NOT be treated as an empty model response and re-sent.
+    await fire(h, "turn_end", {
+      message: {
+        stopReason: "error",
+        errorMessage: '400 "gemma-4-26B" does not support thinking',
+        content: [],
+      },
+    });
+    expect(h.followUps).toHaveLength(0);
+  });
+
+  it("adds a one-time hint when the error is a thinking rejection (#86)", async () => {
+    await fire(h, "turn_end", {
+      message: {
+        stopReason: "error",
+        errorMessage: '400 "gemma-4-26B" does not support thinking',
+        content: [],
+      },
+    });
+    // No correction is steered, but a user-facing hint about the thinking level fires.
+    expect(h.followUps).toHaveLength(0);
+    expect(h.notifies.join("\n")).toMatch(/thinking level/i);
+  });
+
+  it("stays silent on an unrelated provider error (#86)", async () => {
+    await fire(h, "turn_end", {
+      message: { stopReason: "error", errorMessage: "500 upstream timeout", content: [] },
     });
     expect(h.followUps).toHaveLength(0);
     expect(h.notifies).toHaveLength(0);
