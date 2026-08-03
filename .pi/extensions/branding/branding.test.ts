@@ -74,22 +74,19 @@ describe("deriveSessionName", () => {
 });
 
 describe("buildFooterStats", () => {
-  // Capturing theme records (color, text) pairs to assert each metric's color.
-  const capTheme = () => {
-    const calls: Array<[string, string]> = [];
-    return {
-      calls,
-      theme: { fg: (c: string, s: string) => { calls.push([c, s]); return s; }, bold: (s: string) => s } as any,
-    };
-  };
+  const theme: any = { fg: (_c: string, s: string) => s, bold: (s: string) => s };
+  const GREEN = "\x1b[38;2;80;250;123m";
+  const CYAN = "\x1b[38;2;80;250;250m";
+  const YELLOW = "\x1b[38;2;255;220;60m";
+  const BLUE = "\x1b[38;2;98;160;255m";
+  const RED = "\x1b[38;2;255;85;85m";
 
   const base = {
     input: 58000, output: 2600, cacheRead: 958000, cacheWrite: 0,
     cacheHitRate: 91.3, contextPercent: 18.9, contextWindow: 131072, autoCompact: true,
   };
 
-  it("renders every metric with a distinct color", () => {
-    const { theme } = capTheme();
+  it("renders every metric", () => {
     const out = buildFooterStats(theme, base);
     expect(out).toContain("↑58k");
     expect(out).toContain("↓2.6k");
@@ -99,38 +96,26 @@ describe("buildFooterStats", () => {
     expect(out).toContain("(auto)");
   });
 
-  it("colors input=accent, output=success, cache=mdLink", () => {
-    const { calls, theme } = capTheme();
-    buildFooterStats(theme, base);
-    expect(calls).toContainEqual(["accent", "↑58k"]);
-    expect(calls).toContainEqual(["success", "↓2.6k"]);
-    expect(calls).toContainEqual(["mdLink", "R958k"]);
+  it("colors input=cyan, output=green, cache=blue", () => {
+    const out = buildFooterStats(theme, base);
+    expect(out).toContain(`${CYAN}↑58k`);
+    expect(out).toContain(`${GREEN}↓2.6k`);
+    expect(out).toContain(`${BLUE}R958k`);
   });
 
-  it("grades cache-hit rate: high=success, mid=warning, low=error", () => {
-    const hit = (rate: number) => {
-      const { calls, theme } = capTheme();
-      buildFooterStats(theme, { ...base, cacheHitRate: rate });
-      return calls.find(([, t]) => t.startsWith("CH") && t.includes(rate.toFixed(1)))?.[0];
-    };
-    expect(hit(91.3)).toBe("success");
-    expect(hit(60)).toBe("warning");
-    expect(hit(20)).toBe("error");
+  it("grades cache-hit rate: high=green, mid=yellow, low=red", () => {
+    expect(buildFooterStats(theme, { ...base, cacheHitRate: 91.3 })).toContain(`${GREEN}CH91.3%`);
+    expect(buildFooterStats(theme, { ...base, cacheHitRate: 60 })).toContain(`${YELLOW}CH60.0%`);
+    expect(buildFooterStats(theme, { ...base, cacheHitRate: 20 })).toContain(`${RED}CH20.0%`);
   });
 
-  it("grades context pressure: <70 accent, >70 warning, >90 error", () => {
-    const ctx = (pct: number) => {
-      const { calls, theme } = capTheme();
-      buildFooterStats(theme, { ...base, contextPercent: pct });
-      return calls.find(([, t]) => t.startsWith(`${pct.toFixed(1)}%/`))?.[0];
-    };
-    expect(ctx(18.9)).toBe("accent");
-    expect(ctx(75)).toBe("warning");
-    expect(ctx(95)).toBe("error");
+  it("grades context pressure: <70 cyan, >70 yellow, >90 red", () => {
+    expect(buildFooterStats(theme, { ...base, contextPercent: 18.9 })).toContain(`${CYAN}18.9%/`);
+    expect(buildFooterStats(theme, { ...base, contextPercent: 75 })).toContain(`${YELLOW}75.0%/`);
+    expect(buildFooterStats(theme, { ...base, contextPercent: 95 })).toContain(`${RED}95.0%/`);
   });
 
   it("omits zero metrics and handles unknown context percent", () => {
-    const { theme } = capTheme();
     const out = buildFooterStats(theme, {
       input: 0, output: 0, cacheRead: 0, cacheWrite: 0,
       cacheHitRate: undefined, contextPercent: null, contextWindow: 131072, autoCompact: false,

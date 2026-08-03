@@ -1,4 +1,4 @@
-import type { ExtensionAPI, Theme, ThemeColor } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, Theme } from "@earendil-works/pi-coding-agent";
 import { readFileSync } from "node:fs";
 import { basename, dirname, join, isAbsolute, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -29,6 +29,16 @@ const TAGLINE = "A coding agent tuned for small local models";
 // only the foreground, leaving any surrounding bold/style intact.
 const HONEY = "\x1b[38;2;225;90;31m";
 const honeyFg = (s: string): string => `${HONEY}${s}\x1b[39m`;
+
+const V_GREEN = "\x1b[38;2;80;250;123m";
+const V_CYAN = "\x1b[38;2;80;250;250m";
+const V_YELLOW = "\x1b[38;2;255;220;60m";
+const V_BLUE = "\x1b[38;2;98;160;255m";
+const V_MAGENTA = "\x1b[38;2;255;120;255m";
+const V_RED = "\x1b[38;2;255;85;85m";
+const V_ORANGE = "\x1b[38;2;255;160;50m";
+const V_RESET = "\x1b[39m";
+const vivid = (sgr: string, s: string): string => `${sgr}${s}${V_RESET}`;
 
 function readVersion(): string {
   // .pi/extensions/branding/index.ts → up 3 → package root (where package.json lives).
@@ -115,21 +125,20 @@ export interface FooterStats {
 // Colorized reimplementation of pi's dim footer stats line. Exported pure for tests.
 export function buildFooterStats(theme: Theme, s: FooterStats): string {
   const parts: string[] = [];
-  const label = (c: ThemeColor, prefix: string, val: string) =>
-    theme.fg(c, prefix + val);
-  if (s.input) parts.push(label("accent", "↑", formatTokens(s.input)));
-  if (s.output) parts.push(label("success", "↓", formatTokens(s.output)));
-  if (s.cacheRead) parts.push(label("mdLink", "R", formatTokens(s.cacheRead)));
-  if (s.cacheWrite) parts.push(label("mdLink", "W", formatTokens(s.cacheWrite)));
+  const label = (sgr: string, prefix: string, val: string) => vivid(sgr, prefix + val);
+  if (s.input) parts.push(label(V_CYAN, "↑", formatTokens(s.input)));
+  if (s.output) parts.push(label(V_GREEN, "↓", formatTokens(s.output)));
+  if (s.cacheRead) parts.push(label(V_BLUE, "R", formatTokens(s.cacheRead)));
+  if (s.cacheWrite) parts.push(label(V_MAGENTA, "W", formatTokens(s.cacheWrite)));
   if ((s.cacheRead > 0 || s.cacheWrite > 0) && s.cacheHitRate !== undefined) {
-    const hitColor: ThemeColor = s.cacheHitRate >= 80 ? "success" : s.cacheHitRate >= 50 ? "warning" : "error";
-    parts.push(theme.fg(hitColor, `CH${s.cacheHitRate.toFixed(1)}%`));
+    const hitColor = s.cacheHitRate >= 80 ? V_GREEN : s.cacheHitRate >= 50 ? V_YELLOW : V_RED;
+    parts.push(vivid(hitColor, `CH${s.cacheHitRate.toFixed(1)}%`));
   }
-  const auto = s.autoCompact ? theme.fg("warning", " (auto)") : "";
+  const auto = s.autoCompact ? vivid(V_ORANGE, " (auto)") : "";
   const pctVal = s.contextPercent ?? 0;
   const pctStr = s.contextPercent === null ? "?" : pctVal.toFixed(1);
-  const ctxColor: ThemeColor = pctVal > 90 ? "error" : pctVal > 70 ? "warning" : "accent";
-  parts.push(theme.fg(ctxColor, `${pctStr}%/${formatTokens(s.contextWindow)}`) + auto);
+  const ctxColor = pctVal > 90 ? V_RED : pctVal > 70 ? V_YELLOW : V_CYAN;
+  parts.push(vivid(ctxColor, `${pctStr}%/${formatTokens(s.contextWindow)}`) + auto);
   return parts.join(" ");
 }
 
@@ -187,7 +196,7 @@ function buildFooterLines(
     const withProvider = `(${ctx.model.provider}) ${right}`;
     if (visibleWidth(statsLeft) + 2 + visibleWidth(withProvider) <= width) right = withProvider;
   }
-  const rightDim = theme.fg("mdLink", right);
+  const rightDim = vivid(V_BLUE, right);
 
   const statsLeftW = visibleWidth(statsLeft);
   const rightW = visibleWidth(rightDim);
@@ -203,7 +212,7 @@ function buildFooterLines(
   if (branch) pwd = `${pwd} (${branch})`;
   const sessionName = sm.getSessionName?.();
   if (sessionName) pwd = `${pwd} • ${sessionName}`;
-  const pwdLine = truncateLineToWidth(theme.fg("accent", pwd), width);
+  const pwdLine = truncateLineToWidth(vivid(V_MAGENTA, pwd), width);
 
   const lines = [pwdLine, statsLine];
 
