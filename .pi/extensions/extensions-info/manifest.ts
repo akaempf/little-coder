@@ -7,6 +7,8 @@ import { truncateLineToWidth, visibleWidth } from "../_shared/width.ts";
 export interface ExtensionManifest {
   /** Shipped with little-coder — always loaded. */
   bundled: string[];
+  /** From ~/.pi/agent/extensions — the global custom set (mcp-bridge, etc.). */
+  global: string[];
   /** From LITTLE_CODER_EXTRA_EXTENSIONS. */
   env: string[];
   /** From the user extension directory. */
@@ -22,6 +24,7 @@ export interface ExtensionManifest {
 
 const EMPTY: ExtensionManifest = {
   bundled: [],
+  global: [],
   env: [],
   user: [],
   userDir: null,
@@ -46,6 +49,7 @@ export function parseManifest(raw: string | undefined): ExtensionManifest {
     if (!parsed || typeof parsed !== "object") return { ...EMPTY };
     return {
       bundled: stringArray(parsed.bundled),
+      global: stringArray(parsed.global),
       env: stringArray(parsed.env),
       user: stringArray(parsed.user),
       userDir: typeof parsed.userDir === "string" ? parsed.userDir : null,
@@ -61,8 +65,13 @@ export function parseManifest(raw: string | undefined): ExtensionManifest {
 /** `.pi/extensions/foo/index.ts` → `foo`; a bare file → its filename. */
 export function extensionLabel(path: string): string {
   const base = basename(path);
-  if (base === "index.ts" || base === "index.js") return basename(dirname(path));
-  return base;
+  if (base !== "index.ts" && base !== "index.js") return base;
+  // A compiled extension resolves to <name>/dist/index.js; the meaningful
+  // name is the extension dir, not the build-output dir it points through.
+  // Compiled extensions resolve to <name>/dist/index.js — name after <name>.
+  let dir = dirname(path);
+  if (basename(dir) === "dist" || basename(dir) === "build") dir = dirname(dir);
+  return basename(dir);
 }
 
 /**
@@ -153,9 +162,11 @@ export function panelLines(
   const header = `${honey("◆")} ${bold("extensions")}  ${gray("(/extensions to close)")}`;
   const detail = (p: string) => `      ${gray(tildify(p, home))}`;
 
+  const globalExts = m.global ?? [];
   // Rows that must always survive: the counts, the pi-discovery state, and
   // every load error.
-  const fixedCount = 2 + (m.env.length > 0 ? 1 : 0) + 1 + m.warnings.length;
+  const fixedCount =
+    2 + (globalExts.length > 0 ? 1 : 0) + (m.env.length > 0 ? 1 : 0) + 1 + m.warnings.length;
   // …plus the "where to put one" hint, which only appears when there's nothing
   // to list in its place.
   const hintCount = m.user.length === 0 ? 1 : 0;
@@ -189,6 +200,17 @@ export function panelLines(
     const packed = packLabels(names, width, nameBudget);
     detailBudget = Math.max(0, detailBudget - packed.length);
     lines.push(...packed.map((l) => gray(l)));
+  }
+  if (globalExts.length > 0) {
+    lines.push(`  ${honey("global")}   ${String(globalExts.length).padStart(3)} ${gray("loaded")}`);
+    if (showBundledNames) {
+      const names = globalExts.map(extensionLabel).sort();
+      const reserved = (m.user.length > 0 ? 1 : 0) + (m.env.length > 0 ? 1 : 0);
+      const nameBudget = Math.max(1, detailBudget - reserved);
+      const packed = packLabels(names, width, nameBudget);
+      detailBudget = Math.max(0, detailBudget - packed.length);
+      lines.push(...packed.map((l) => gray(l)));
+    }
   }
   lines.push(`  ${honey("yours")}    ${String(m.user.length).padStart(3)} ${gray("loaded")}`);
   lines.push(...take(m.user));

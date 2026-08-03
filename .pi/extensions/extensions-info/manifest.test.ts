@@ -4,6 +4,7 @@ import { stripAnsi, visibleWidth } from "../_shared/width.ts";
 
 const full = {
   bundled: ["/pkg/.pi/extensions/branding/index.ts", "/pkg/.pi/extensions/write-guard/index.ts"],
+  global: ["/home/me/.pi/agent/extensions/mcp-bridge/index.ts", "/home/me/.pi/agent/extensions/perf-status/index.ts"],
   env: ["/opt/pi-ponytail/extensions/ponytail.js"],
   user: ["/home/me/.config/little-coder/extensions/telegram.ts"],
   userDir: "/home/me/.config/little-coder/extensions",
@@ -40,6 +41,10 @@ describe("extensionLabel", () => {
   });
   it("names a single-file extension after the file", () => {
     expect(extensionLabel("/x/ponytail.js")).toBe("ponytail.js");
+  });
+  it("names a compiled extension after its dir, not its build folder", () => {
+    expect(extensionLabel("/h/.pi/agent/extensions/mcp-bridge/dist/index.js")).toBe("mcp-bridge");
+    expect(extensionLabel("/h/e/build/index.js")).toBe("e");
   });
 });
 
@@ -113,6 +118,23 @@ describe("panelLines", () => {
   it("omits the env section entirely when unused", () => {
     expect(text({ ...full, env: [] })).not.toContain("LITTLE_CODER_EXTRA_EXTENSIONS");
     expect(text(full)).toContain("LITTLE_CODER_EXTRA_EXTENSIONS");
+  });
+
+  it("counts global custom extensions, omitting the row when none", () => {
+    expect(text(full)).toContain("global");
+    expect(text({ ...full, global: [] })).not.toContain("global");
+  });
+
+  it("lists global extensions by name when expanded", () => {
+    const out = panelLines(full, 120, "/home/me", true).join("\n");
+    expect(out).toContain("mcp-bridge");
+    expect(out).toContain("perf-status");
+  });
+
+  it("tolerates a manifest missing the global field", () => {
+    const { global: _omit, ...noGlobal } = full;
+    expect(() => panelLines(noGlobal as any, 120, "/home/me")).not.toThrow();
+    expect(panelLines(noGlobal as any, 120, "/home/me").join("\n")).not.toContain("global");
   });
 
   it("fits inside pi's 10-line widget cap", () => {

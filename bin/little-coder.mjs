@@ -216,6 +216,49 @@ let userExtensionWarnings = [];
   }
 }
 
+// ---- 4c-global. Global custom extensions in ~/.pi/agent/extensions ----
+// little-coder's own always-on extensions (mcp-bridge, perf-status, sqz, …)
+// live here, one per directory, resolved via a `pi.extensions` manifest in the
+// directory's package.json when present, else its index.ts/index.js. Loaded
+// directly as --extension flags (NOT via pi's --no-extensions discovery, which
+// the launcher disables), so they load without a per-cwd trust prompt.
+const loadedFromGlobal = [];
+const globalExtDir = join(homedir(), ".pi", "agent", "extensions");
+if (existsSync(globalExtDir)) {
+  for (const name of readdirSync(globalExtDir).sort()) {
+    const subdir = join(globalExtDir, name);
+    try {
+      if (!statSync(subdir).isDirectory()) continue;
+      const pkgPath = join(subdir, "package.json");
+      if (existsSync(pkgPath)) {
+        const manifest = JSON.parse(readFileSync(pkgPath, "utf-8"));
+        const entries = manifest?.pi?.extensions;
+        if (Array.isArray(entries) && entries.length > 0) {
+          for (const entry of entries) {
+            const resolved = join(subdir, entry);
+            if (existsSync(resolved)) {
+              extArgs.push("--extension", resolved);
+              loadedFromGlobal.push(resolved);
+            }
+          }
+          continue;
+        }
+      }
+      const idxTs = join(subdir, "index.ts");
+      const idxJs = join(subdir, "index.js");
+      if (existsSync(idxTs)) {
+        extArgs.push("--extension", idxTs);
+        loadedFromGlobal.push(idxTs);
+      } else if (existsSync(idxJs)) {
+        extArgs.push("--extension", idxJs);
+        loadedFromGlobal.push(idxJs);
+      }
+    } catch {
+      // skip unreadable / malformed entries
+    }
+  }
+}
+
 // ---- 4d. Opt-in pi-ecosystem bridge (issue #67) ----
 // Off by default, deliberately. `--no-extensions` is why "exactly this set
 // loads" holds, and that predictability is a feature on small models. But
@@ -399,6 +442,7 @@ const piArgs = [
 // sees an undifferentiated list of --extension flags.
 process.env.LITTLE_CODER_EXTENSION_MANIFEST = JSON.stringify({
   bundled: loadedBundled,
+  global: loadedFromGlobal,
   env: loadedFromEnv,
   user: loadedFromUserDir,
   userDir: userExtensionsDir ?? null,
