@@ -25,6 +25,7 @@ const BUILTIN_SAFE_PREFIXES: readonly string[] = [
   // "cp " matches "cp a b" but not "cpufetch". rm stays off the list by
   // design; use LITTLE_CODER_BASH_ALLOW=rm if a deployment needs it.
   "cp ", "mv ", "mkdir ", "touch ",
+  "scp ", "ssh ",
 ];
 
 // Trailing whitespace is meaningful — it acts as a word boundary in startsWith

@@ -37,33 +37,14 @@ Additional tools appear per benchmark: `BrowserNavigate`/`Click`/`Type`/`Scroll`
 
 ## MCP Servers
 
-Auto-activated by keyword. Tools appear as `{serverName}_{toolName}` (e.g. `engram_mem_session_summary`, `atlassian-jira_jira_get`).
+Auto-activated by keyword. Tools appear as `{serverName}_{toolName}` (e.g. `engram_mem_session_summary`).
 Manual: `mcp_activate("name")` / `mcp_deactivate("name")`.
 
-Servers: jira, confluence, github, dynatrace, filesystem, context7, aws-api, engram.
-
-### Dynatrace
-
-Available tools: `execute_dql`, `list_problems`, `find_entity_by_name`, `list_vulnerabilities`, `list_exceptions`, `generate_dql_from_natural_language`.
-
-**When unsure about DQL syntax**: Use `generate_dql_from_natural_language` — describe what you want in plain English and it returns the correct DQL. Always prefer this over guessing DQL syntax.
-
-**DQL workflow**: If you need to query Dynatrace data but don't know the exact DQL:
-1. Call `generate_dql_from_natural_language` with your question
-2. Use the returned DQL in `execute_dql`
+Servers: github, filesystem, context7, aws-api, engram.
 
 ### Local vs Remote
 
 For local git operations (status, log, diff, commit, push), ALWAYS use `bash` with `git` commands. MCP tools like `github_search_repositories` are for GitHub API operations only (searching remote repos, creating PRs/issues). Never use the GitHub MCP to check local repo status.
-
-### Jira
-
-**CRITICAL**: The Jira search endpoint `/rest/api/3/search` is DEPRECATED and returns errors. Always use `/rest/api/3/search/jql` instead. When calling `atlassian-jira_jira_get` or constructing any Jira search request, ensure the JQL endpoint is used.
-
-**IMPORTANT**: Always include `"maxResults": "50"` in queryParams for search requests. The `/rest/api/3/search/jql` endpoint defaults to `maxResults=0` which returns a 400 error. Example:
-```
-atlassian-jira_jira_get(path="/rest/api/3/search/jql", queryParams={"jql": "assignee=currentUser() AND status != Done", "maxResults": "50"})
-```
 
 ### Memory (engram)
 

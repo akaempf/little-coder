@@ -56,24 +56,6 @@ const INTENT_MAP: Record<string, string[]> = {
   browse: ["BrowserNavigate", "BrowserExtract"],
   page: ["BrowserExtract"],
   click: ["BrowserClick"],
-  dynatrace: ["dynatrace_verify_dql", "dynatrace_execute_dql", "dynatrace_find_entity_by_name"],
-  dql: ["dynatrace_verify_dql", "dynatrace_execute_dql"],
-  cpu: ["dynatrace_verify_dql", "dynatrace_execute_dql"],
-  metrics: ["dynatrace_verify_dql", "dynatrace_execute_dql"],
-  memory: ["dynatrace_verify_dql", "dynatrace_execute_dql"],
-  network: ["dynatrace_verify_dql", "dynatrace_execute_dql"],
-  logs: ["dynatrace_verify_dql", "dynatrace_execute_dql"],
-  traces: ["dynatrace_verify_dql", "dynatrace_execute_dql"],
-  spans: ["dynatrace_verify_dql", "dynatrace_execute_dql"],
-  services: ["dynatrace_verify_dql", "dynatrace_execute_dql", "dynatrace_find_entity_by_name"],
-  host: ["dynatrace_verify_dql", "dynatrace_execute_dql", "dynatrace_find_entity_by_name"],
-  process: ["dynatrace_verify_dql", "dynatrace_execute_dql"],
-  observability: ["dynatrace_verify_dql", "dynatrace_execute_dql", "dynatrace_list_problems"],
-  problem: ["dynatrace_list_problems"],
-  problems: ["dynatrace_list_problems"],
-  vulnerability: ["dynatrace_list_vulnerabilities"],
-  vulnerabilities: ["dynatrace_list_vulnerabilities"],
-  exceptions: ["dynatrace_list_exceptions"],
   "save-session": ["engram_mem_session_summary"],
   "session-summary": ["engram_mem_session_summary"],
   engram: ["engram_mem_session_summary", "engram_mem_search"],
@@ -108,11 +90,7 @@ function loadSkills(): void {
   }
 }
 
-const HIGH_PRIORITY_TOOLS = new Set([
-  "dynatrace_execute_dql",
-  "dynatrace_find_entity_by_name",
-  "dynatrace_list_problems",
-]);
+const HIGH_PRIORITY_TOOLS = new Set<string>();
 
 function predictTools(userText: string): string[] {
   const words = new Set(userText.toLowerCase().split(/\s+/).filter(Boolean));

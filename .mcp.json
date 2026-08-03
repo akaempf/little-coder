@@ -1,69 +1,6 @@
 {
   "excludeServers": ["sqz"],
   "mcpServers": {
-    "atlassian-jira": {
-      "command": "mcp-atlassian-jira",
-      "args": [],
-      "env": {
-        "ATLASSIAN_SITE_NAME": "caremetx",
-        "ATLASSIAN_USER_EMAIL": "{env:JIRA_USERNAME}",
-        "ATLASSIAN_API_TOKEN": "{env:JIRA_API_TOKEN}",
-        "DT_ENVIRONMENT": "https://jop65683.apps.dynatrace.com"
-      },
-      "description": "Jira operations \u2014 issues, sprints, boards, JQL search",
-      "triggerKeywords": [
-        "jira",
-        "ticket",
-        "sprint",
-        "backlog",
-        "board",
-        "jql",
-        "story",
-        "epic",
-        "kanban",
-        "scrum",
-        "assignee",
-        "blocker",
-        "bug report",
-        "user story",
-        "acceptance criteria",
-        "story points",
-        "velocity",
-        "standup",
-        "retrospective"
-      ],
-      "includeTools": [
-        "jira_get",
-        "jira_post"
-      ],
-      "autoActivate": false
-    },
-    "atlassian-confluence": {
-      "command": "mcp-atlassian-confluence",
-      "args": [],
-      "env": {
-        "ATLASSIAN_SITE_NAME": "caremetx",
-        "ATLASSIAN_USER_EMAIL": "akaempf@caremetx.com",
-        "ATLASSIAN_API_TOKEN": "{env:CONFLUENCE_API_TOKEN}"
-      },
-      "description": "Confluence operations \u2014 pages, spaces, search, content",
-      "triggerKeywords": [
-        "confluence",
-        "wiki",
-        "knowledge base",
-        "runbook",
-        "playbook",
-        "postmortem",
-        "design doc",
-        "technical spec",
-        "team page"
-      ],
-      "includeTools": [
-        "conf_get",
-        "conf_post"
-      ],
-      "autoActivate": false
-    },
     "github": {
       "command": "mcp-server-github",
       "args": [],
@@ -212,34 +149,6 @@
         "boto3"
       ],
       "autoActivate": false
-    },
-    "dynatrace": {
-      "command": "mcp-server-dynatrace",
-      "args": [],
-      "env": {
-        "DT_ENVIRONMENT": "https://jop65683.apps.dynatrace.com"
-      },
-      "description": "Dynatrace observability \u2014 problems, DQL queries, Davis AI",
-      "triggerKeywords": [
-        "dynatrace",
-        "davis ai",
-        "dql query",
-        "synthetic monitor",
-        "anomaly detection",
-        "service flow",
-        "distributed trace",
-        "log analytics"
-      ],
-      "includeTools": [
-        "execute_dql",
-        "list_problems",
-        "find_entity_by_name",
-        "list_vulnerabilities",
-        "list_exceptions",
-        "generate_dql_from_natural_language"
-      ],
-      "autoActivate": false,
-      "keepAlive": true
     },
     "engram": {
       "command": "engram",

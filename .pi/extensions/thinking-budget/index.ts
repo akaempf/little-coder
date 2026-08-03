@@ -40,7 +40,7 @@ type ThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
 //      task can think again. (A new task should not inherit "off" just because
 //      a previous one over-thought.)
 
-const DEFAULT_BUDGET = 4096;
+const DEFAULT_BUDGET = 8192;
 
 // Per-run rolling state.
 let thinkingChars = 0;
