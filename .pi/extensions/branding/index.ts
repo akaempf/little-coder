@@ -1,8 +1,8 @@
-import type { ExtensionAPI, Theme } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, Theme, ThemeColor } from "@earendil-works/pi-coding-agent";
 import { readFileSync } from "node:fs";
-import { basename, dirname, join } from "node:path";
+import { basename, dirname, join, isAbsolute, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
-import { truncateLineToWidth } from "../_shared/width.ts";
+import { truncateLineToWidth, visibleWidth } from "../_shared/width.ts";
 
 // Replace pi's built-in startup header + terminal title with little-coder
 // branding. The interactive TUI's "pi vX.Y.Z" logo, the "Pi can explain its
@@ -84,6 +84,140 @@ export function buildHeader(theme: Theme, width: number): string[] {
   );
 }
 
+function formatTokens(count: number): string {
+  if (count < 1000) return count.toString();
+  if (count < 10000) return `${(count / 1000).toFixed(1)}k`;
+  if (count < 1000000) return `${Math.round(count / 1000)}k`;
+  if (count < 10000000) return `${(count / 1000000).toFixed(1)}M`;
+  return `${Math.round(count / 1000000)}M`;
+}
+
+function cwdForFooter(cwd: string, home: string | undefined): string {
+  if (!home) return cwd;
+  const rel = relative(resolve(home), resolve(cwd));
+  const inside =
+    rel === "" || (rel !== ".." && !rel.startsWith(`..${sep}`) && !isAbsolute(rel));
+  if (!inside) return cwd;
+  return rel === "" ? "~" : `~${sep}${rel}`;
+}
+
+export interface FooterStats {
+  input: number;
+  output: number;
+  cacheRead: number;
+  cacheWrite: number;
+  cacheHitRate: number | undefined;
+  contextPercent: number | null;
+  contextWindow: number;
+  autoCompact: boolean;
+}
+
+// Colorized reimplementation of pi's dim footer stats line. Exported pure for tests.
+export function buildFooterStats(theme: Theme, s: FooterStats): string {
+  const parts: string[] = [];
+  const label = (c: ThemeColor, prefix: string, val: string) =>
+    theme.fg("dim", prefix) + theme.fg(c, val);
+  if (s.input) parts.push(label("accent", "↑", formatTokens(s.input)));
+  if (s.output) parts.push(label("success", "↓", formatTokens(s.output)));
+  if (s.cacheRead) parts.push(label("mdLink", "R", formatTokens(s.cacheRead)));
+  if (s.cacheWrite) parts.push(label("mdLink", "W", formatTokens(s.cacheWrite)));
+  if ((s.cacheRead > 0 || s.cacheWrite > 0) && s.cacheHitRate !== undefined) {
+    const hitColor: ThemeColor = s.cacheHitRate >= 80 ? "success" : s.cacheHitRate >= 50 ? "warning" : "error";
+    parts.push(theme.fg("dim", "CH") + theme.fg(hitColor, `${s.cacheHitRate.toFixed(1)}%`));
+  }
+  const auto = s.autoCompact ? theme.fg("dim", " (auto)") : "";
+  const pctVal = s.contextPercent ?? 0;
+  const pctStr = s.contextPercent === null ? "?" : pctVal.toFixed(1);
+  const ctxColor: ThemeColor = pctVal > 90 ? "error" : pctVal > 70 ? "warning" : "accent";
+  parts.push(theme.fg(ctxColor, `${pctStr}%`) + theme.fg("dim", `/${formatTokens(s.contextWindow)}`) + auto);
+  return parts.join(" ");
+}
+
+// Full footer (pwd, colorized stats + right-aligned model, ext-status line),
+// matching pi footer.js layout so setFooter causes no visual regression.
+function buildFooterLines(
+  theme: Theme,
+  width: number,
+  ctx: any,
+  footerData: { getGitBranch(): string | null; getExtensionStatuses(): ReadonlyMap<string, string>; getAvailableProviderCount(): number },
+): string[] {
+  const sm = ctx.sessionManager;
+
+  const totals = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
+  let cacheHitRate: number | undefined;
+  try {
+    for (const entry of sm.getEntries()) {
+      const u = entry?.message?.usage ?? entry?.usage;
+      if (!u) continue;
+      const isAssistant = entry.type === "message" && entry.message?.role === "assistant";
+      const isToolResult = entry.type === "message" && entry.message?.role === "toolResult";
+      const isSummary = entry.type === "branch_summary" || entry.type === "compaction";
+      if (!(isAssistant || isToolResult || isSummary)) continue;
+      totals.input += u.input ?? 0;
+      totals.output += u.output ?? 0;
+      totals.cacheRead += u.cacheRead ?? 0;
+      totals.cacheWrite += u.cacheWrite ?? 0;
+      if (isAssistant) {
+        const prompt = (u.input ?? 0) + (u.cacheRead ?? 0) + (u.cacheWrite ?? 0);
+        cacheHitRate = prompt > 0 ? ((u.cacheRead ?? 0) / prompt) * 100 : undefined;
+      }
+    }
+  } catch {
+    // best-effort: a stats read failure must not crash the footer
+  }
+
+  const ctxUsage = ctx.getContextUsage?.();
+  const contextWindow = ctxUsage?.contextWindow ?? ctx.model?.contextWindow ?? 0;
+
+  const statsLeft = buildFooterStats(theme, {
+    ...totals,
+    cacheHitRate,
+    contextPercent: ctxUsage?.percent ?? null,
+    contextWindow,
+    autoCompact: true,
+  });
+
+  const modelName = ctx.model?.id ?? "no-model";
+  let right = modelName;
+  if (ctx.model?.reasoning) {
+    const level = ctx.thinkingLevel || "off";
+    right = level === "off" ? `${modelName} • thinking off` : `${modelName} • ${level}`;
+  }
+  if (footerData.getAvailableProviderCount() > 1 && ctx.model?.provider) {
+    const withProvider = `(${ctx.model.provider}) ${right}`;
+    if (visibleWidth(statsLeft) + 2 + visibleWidth(withProvider) <= width) right = withProvider;
+  }
+  const rightDim = theme.fg("dim", right);
+
+  const statsLeftW = visibleWidth(statsLeft);
+  const rightW = visibleWidth(rightDim);
+  let statsLine: string;
+  if (statsLeftW + 2 + rightW <= width) {
+    statsLine = statsLeft + " ".repeat(Math.max(0, width - statsLeftW - rightW)) + rightDim;
+  } else {
+    statsLine = truncateLineToWidth(statsLeft, width);
+  }
+
+  let pwd = cwdForFooter(sm.getCwd(), process.env.HOME || process.env.USERPROFILE);
+  const branch = footerData.getGitBranch();
+  if (branch) pwd = `${pwd} (${branch})`;
+  const sessionName = sm.getSessionName?.();
+  if (sessionName) pwd = `${pwd} • ${sessionName}`;
+  const pwdLine = truncateLineToWidth(theme.fg("dim", pwd), width);
+
+  const lines = [pwdLine, statsLine];
+
+  const statuses = footerData.getExtensionStatuses();
+  if (statuses.size > 0) {
+    const statusLine = Array.from(statuses.entries())
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([, text]) => text.replace(/[\r\n\t]/g, " ").replace(/ +/g, " ").trim())
+      .join(" ");
+    lines.push(truncateLineToWidth(statusLine, width));
+  }
+  return lines;
+}
+
 // Derive a short, human session name from the first user prompt. Returns
 // undefined when there's nothing worth naming (empty, or a command/bash line).
 // Kept pure + exported so the slug rules are unit-testable.
@@ -127,6 +261,13 @@ export default function (pi: ExtensionAPI) {
     ctx.ui.setHeader((_tui, theme) => ({
       render(width: number): string[] {
         return buildHeader(theme, width);
+      },
+      invalidate() {},
+    }));
+
+    ctx.ui.setFooter((_tui, theme, footerData) => ({
+      render(width: number): string[] {
+        return buildFooterLines(theme, width, ctx, footerData);
       },
       invalidate() {},
     }));
