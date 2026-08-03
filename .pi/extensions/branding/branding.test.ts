@@ -102,16 +102,16 @@ describe("buildFooterStats", () => {
   it("colors input=accent, output=success, cache=mdLink", () => {
     const { calls, theme } = capTheme();
     buildFooterStats(theme, base);
-    expect(calls).toContainEqual(["accent", "58k"]);
-    expect(calls).toContainEqual(["success", "2.6k"]);
-    expect(calls).toContainEqual(["mdLink", "958k"]);
+    expect(calls).toContainEqual(["accent", "↑58k"]);
+    expect(calls).toContainEqual(["success", "↓2.6k"]);
+    expect(calls).toContainEqual(["mdLink", "R958k"]);
   });
 
   it("grades cache-hit rate: high=success, mid=warning, low=error", () => {
     const hit = (rate: number) => {
       const { calls, theme } = capTheme();
       buildFooterStats(theme, { ...base, cacheHitRate: rate });
-      return calls.find(([, t]) => t.includes("%") && t.includes(rate.toFixed(1)))?.[0];
+      return calls.find(([, t]) => t.startsWith("CH") && t.includes(rate.toFixed(1)))?.[0];
     };
     expect(hit(91.3)).toBe("success");
     expect(hit(60)).toBe("warning");
@@ -122,7 +122,7 @@ describe("buildFooterStats", () => {
     const ctx = (pct: number) => {
       const { calls, theme } = capTheme();
       buildFooterStats(theme, { ...base, contextPercent: pct });
-      return calls.find(([, t]) => t === `${pct.toFixed(1)}%`)?.[0];
+      return calls.find(([, t]) => t.startsWith(`${pct.toFixed(1)}%/`))?.[0];
     };
     expect(ctx(18.9)).toBe("accent");
     expect(ctx(75)).toBe("warning");

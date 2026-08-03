@@ -116,20 +116,20 @@ export interface FooterStats {
 export function buildFooterStats(theme: Theme, s: FooterStats): string {
   const parts: string[] = [];
   const label = (c: ThemeColor, prefix: string, val: string) =>
-    theme.fg("dim", prefix) + theme.fg(c, val);
+    theme.fg(c, prefix + val);
   if (s.input) parts.push(label("accent", "↑", formatTokens(s.input)));
   if (s.output) parts.push(label("success", "↓", formatTokens(s.output)));
   if (s.cacheRead) parts.push(label("mdLink", "R", formatTokens(s.cacheRead)));
   if (s.cacheWrite) parts.push(label("mdLink", "W", formatTokens(s.cacheWrite)));
   if ((s.cacheRead > 0 || s.cacheWrite > 0) && s.cacheHitRate !== undefined) {
     const hitColor: ThemeColor = s.cacheHitRate >= 80 ? "success" : s.cacheHitRate >= 50 ? "warning" : "error";
-    parts.push(theme.fg("dim", "CH") + theme.fg(hitColor, `${s.cacheHitRate.toFixed(1)}%`));
+    parts.push(theme.fg(hitColor, `CH${s.cacheHitRate.toFixed(1)}%`));
   }
-  const auto = s.autoCompact ? theme.fg("dim", " (auto)") : "";
+  const auto = s.autoCompact ? theme.fg("warning", " (auto)") : "";
   const pctVal = s.contextPercent ?? 0;
   const pctStr = s.contextPercent === null ? "?" : pctVal.toFixed(1);
   const ctxColor: ThemeColor = pctVal > 90 ? "error" : pctVal > 70 ? "warning" : "accent";
-  parts.push(theme.fg(ctxColor, `${pctStr}%`) + theme.fg("dim", `/${formatTokens(s.contextWindow)}`) + auto);
+  parts.push(theme.fg(ctxColor, `${pctStr}%/${formatTokens(s.contextWindow)}`) + auto);
   return parts.join(" ");
 }
 
@@ -187,7 +187,7 @@ function buildFooterLines(
     const withProvider = `(${ctx.model.provider}) ${right}`;
     if (visibleWidth(statsLeft) + 2 + visibleWidth(withProvider) <= width) right = withProvider;
   }
-  const rightDim = theme.fg("dim", right);
+  const rightDim = theme.fg("mdLink", right);
 
   const statsLeftW = visibleWidth(statsLeft);
   const rightW = visibleWidth(rightDim);
@@ -203,7 +203,7 @@ function buildFooterLines(
   if (branch) pwd = `${pwd} (${branch})`;
   const sessionName = sm.getSessionName?.();
   if (sessionName) pwd = `${pwd} • ${sessionName}`;
-  const pwdLine = truncateLineToWidth(theme.fg("dim", pwd), width);
+  const pwdLine = truncateLineToWidth(theme.fg("accent", pwd), width);
 
   const lines = [pwdLine, statsLine];
 
