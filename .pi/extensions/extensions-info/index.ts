@@ -28,11 +28,17 @@ import { panelLines, parseManifest } from "./manifest.ts";
 const WIDGET_KEY = "extensions-info";
 
 let panelOn = false;
+let namesOn = false;
 
 function setPanel(ctx: any, on: boolean): void {
   if (!ctx?.hasUI) return;
   const content = on
-    ? panelLines(parseManifest(process.env.LITTLE_CODER_EXTENSION_MANIFEST), terminalColumns())
+    ? panelLines(
+        parseManifest(process.env.LITTLE_CODER_EXTENSION_MANIFEST),
+        terminalColumns(),
+        undefined,
+        namesOn,
+      )
     : undefined;
   ctx.ui.setWidget(WIDGET_KEY, content, { placement: "belowEditor" });
 }
@@ -40,8 +46,15 @@ function setPanel(ctx: any, on: boolean): void {
 export default function (pi: ExtensionAPI) {
   pi.registerCommand("extensions", {
     description: "Show loaded extensions, where each came from, and any load errors",
-    handler: async (_args: string, ctx: any) => {
-      panelOn = !panelOn;
+    handler: async (args: string, ctx: any) => {
+      const wantsNames = args.trim().toLowerCase() === "names";
+      if (wantsNames) {
+        namesOn = !(panelOn && namesOn);
+        panelOn = true;
+      } else {
+        namesOn = false;
+        panelOn = !panelOn;
+      }
       setPanel(ctx, panelOn);
     },
   });
@@ -49,6 +62,7 @@ export default function (pi: ExtensionAPI) {
   pi.on("session_start", async (_event, ctx) => {
     // Default hidden so a resumed session doesn't surface a stale panel.
     panelOn = false;
+    namesOn = false;
     setPanel(ctx, false);
 
     // Surface load failures unprompted — the launcher's stderr warning has

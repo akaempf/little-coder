@@ -65,6 +65,54 @@ export function extensionLabel(path: string): string {
   return base;
 }
 
+/**
+ * Pack labels into ≤`maxLines` indented, comma-separated lines fitting `width`.
+ * On overflow the last line ends with `+N more`. Returns uncolored lines.
+ */
+export function packLabels(
+  labels: string[],
+  width: number,
+  maxLines: number,
+  indent = "      ",
+): string[] {
+  if (labels.length === 0 || maxLines <= 0) return [];
+  const usable = Math.max(1, width - indent.length);
+  const lines: string[] = [];
+  let cur = "";
+  let placed = 0;
+
+  const flush = () => {
+    if (cur) {
+      lines.push(truncateLineToWidth(indent + cur, width));
+      cur = "";
+    }
+  };
+
+  for (const label of labels) {
+    const piece = cur ? `, ${label}` : label;
+    if ((cur + piece).length <= usable) {
+      cur += piece;
+      placed++;
+      continue;
+    }
+    if (lines.length + 1 >= maxLines) {
+      const marker = `, +${labels.length - placed} more`;
+      while (cur && (indent + cur + marker).length > width && cur.includes(", ")) {
+        cur = cur.slice(0, cur.lastIndexOf(", "));
+      }
+      const combined = `${cur}${marker}`;
+      lines.push(truncateLineToWidth(indent + combined, width));
+      cur = "";
+      return lines;
+    }
+    flush();
+    cur = label;
+    placed++;
+  }
+  flush();
+  return lines;
+}
+
 /** Replace the home prefix with `~` so paths fit and read cleanly. */
 export function tildify(path: string, home: string | undefined): string {
   if (home && home.length > 1 && path.startsWith(home)) return `~${path.slice(home.length)}`;
@@ -100,6 +148,7 @@ export function panelLines(
   m: ExtensionManifest,
   width: number,
   home: string | undefined = process.env.HOME || process.env.USERPROFILE,
+  showBundledNames = false,
 ): string[] {
   const header = `${honey("◆")} ${bold("extensions")}  ${gray("(/extensions to close)")}`;
   const detail = (p: string) => `      ${gray(tildify(p, home))}`;
@@ -128,7 +177,19 @@ export function panelLines(
 
   const lines: string[] = [header];
 
-  lines.push(`  ${honey("bundled")}  ${String(m.bundled.length).padStart(3)} ${gray("loaded")}`);
+  const bundledHint = showBundledNames ? "" : `  ${gray("(/extensions names)")}`;
+  lines.push(
+    `  ${honey("bundled")}  ${String(m.bundled.length).padStart(3)} ${gray("loaded")}${bundledHint}`,
+  );
+  if (showBundledNames && m.bundled.length > 0) {
+    const names = m.bundled.map(extensionLabel).sort();
+    // Reserve a detail line for user + env sections so names can't starve them.
+    const reserved = (m.user.length > 0 ? 1 : 0) + (m.env.length > 0 ? 1 : 0);
+    const nameBudget = Math.max(1, detailBudget - reserved);
+    const packed = packLabels(names, width, nameBudget);
+    detailBudget = Math.max(0, detailBudget - packed.length);
+    lines.push(...packed.map((l) => gray(l)));
+  }
   lines.push(`  ${honey("yours")}    ${String(m.user.length).padStart(3)} ${gray("loaded")}`);
   lines.push(...take(m.user));
   if (m.user.length === 0) {

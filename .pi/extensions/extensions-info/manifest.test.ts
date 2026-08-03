@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { extensionLabel, panelLines, parseManifest, tildify } from "./manifest.ts";
-import { visibleWidth } from "../_shared/width.ts";
+import { extensionLabel, packLabels, panelLines, parseManifest, tildify } from "./manifest.ts";
+import { stripAnsi, visibleWidth } from "../_shared/width.ts";
 
 const full = {
   bundled: ["/pkg/.pi/extensions/branding/index.ts", "/pkg/.pi/extensions/write-guard/index.ts"],
@@ -50,6 +50,35 @@ describe("tildify", () => {
   it("leaves other paths alone", () => {
     expect(tildify("/opt/e.ts", "/home/me")).toBe("/opt/e.ts");
     expect(tildify("/opt/e.ts", undefined)).toBe("/opt/e.ts");
+  });
+});
+
+describe("packLabels", () => {
+  const names = Array.from({ length: 33 }, (_, i) => `ext-${i}`);
+
+  it("packs everything onto few lines when width allows", () => {
+    const lines = packLabels(names, 120, 6);
+    expect(lines.length).toBeLessThanOrEqual(6);
+    expect(lines.join(", ")).toContain("ext-0");
+    expect(lines.join(", ")).toContain("ext-32");
+  });
+
+  it("never exceeds maxLines and marks the overflow", () => {
+    const lines = packLabels(names, 40, 2);
+    expect(lines.length).toBeLessThanOrEqual(2);
+    expect(lines.join("\n")).toMatch(/\+\d+ more/);
+  });
+
+  it("keeps each line within width (indent included)", () => {
+    for (const w of [20, 30, 40, 80]) {
+      for (const l of packLabels(names, w, 4)) {
+        expect(visibleWidth(l)).toBeLessThanOrEqual(w);
+      }
+    }
+  });
+
+  it("returns nothing for empty input", () => {
+    expect(packLabels([], 80, 5)).toEqual([]);
   });
 });
 
@@ -122,5 +151,40 @@ describe("panelLines", () => {
 
   it("renders an empty manifest without throwing", () => {
     expect(() => panelLines(parseManifest(undefined), 80, "/home/me")).not.toThrow();
+  });
+
+  it("lists bundled extensions by name when asked, still fitting the cap", () => {
+    const bundled = Array.from(
+      { length: 33 },
+      (_, i) => `/pkg/.pi/extensions/e${i}/index.ts`,
+    );
+    const m = { ...full, bundled, user: [], userDirExists: false };
+    const off = panelLines(m, 120, "/home/me", false).join("\n");
+    expect(off).toContain("/extensions names");
+    expect(off).not.toContain("      e0");
+
+    const on = panelLines(m, 120, "/home/me", true);
+    expect(on.length).toBeLessThanOrEqual(10);
+    const flat = stripAnsi(on.join("\n"));
+    expect(flat).toContain("e0");
+    expect(flat).toContain("pi extensions");
+    expect(flat).toContain("no index.ts/index.js");
+  });
+
+  it("keeps fixed rows when names are shown at a narrow width", () => {
+    const bundled = Array.from(
+      { length: 33 },
+      (_, i) => `/pkg/.pi/extensions/e${i}/index.ts`,
+    );
+    const m = { ...full, bundled, user: [], userDirExists: false };
+    for (const width of [30, 40, 80]) {
+      const lines = panelLines(m, width, "/home/me", true);
+      const flat = stripAnsi(lines.join("\n"));
+      expect(lines.length).toBeLessThanOrEqual(10);
+      expect(flat).toContain("pi extensions");
+      // The warning ROW survives (its text may be width-truncated with an ellipsis).
+      expect(flat).toMatch(/!\s+user extension/);
+      for (const l of lines) expect(visibleWidth(l)).toBeLessThanOrEqual(width);
+    }
   });
 });
