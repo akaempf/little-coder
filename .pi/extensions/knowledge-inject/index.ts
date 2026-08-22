@@ -4,6 +4,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseSkillFile } from "../skill-inject/frontmatter.ts";
 import { injectionResult, makeDedupe } from "../_shared/inject.ts";
+import { allowedToolSet, toolsAvailable } from "../_shared/allowed-tools.ts";
 
 // ── Knowledge-entry registry ────────────────────────────────────────────
 // Port of local/knowledge_augment.py. Loads skills/knowledge/*.md plus the
@@ -14,7 +15,7 @@ import { injectionResult, makeDedupe } from "../_shared/inject.ts";
 // Like skill-inject, the selected entries ride in as a tail message rather
 // than a system-prompt append (issue #73 — see _shared/inject.ts).
 
-interface KnowledgeEntry {
+export interface KnowledgeEntry {
   topic: string;
   body: string;
   tokenCost: number;
@@ -26,7 +27,7 @@ const entries = new Map<string, KnowledgeEntry>();
 const cache = new Map<string, string>();
 let loaded = false;
 
-const MIN_SCORE_THRESHOLD = 2.0;
+export const MIN_SCORE_THRESHOLD = 2.0;
 const PER_ENTRY_CAP = 150;
 
 function dirs(): string[] {
@@ -62,7 +63,7 @@ function loadEntries(): void {
 }
 
 // ── Scoring (word=1.0, bigram/phrase=2.0) ───────────────────────────────
-function scoreEntry(userText: string, e: KnowledgeEntry): number {
+export function scoreEntry(userText: string, e: KnowledgeEntry): number {
   if (e.keywords.length === 0) return 0;
   const textLower = userText.toLowerCase();
   const words = new Set(textLower.split(/\s+/).filter(Boolean));
@@ -107,8 +108,15 @@ export default function (pi: ExtensionAPI) {
     const prompt = event.prompt ?? "";
     if (!prompt) return;
 
+    // Never inject an entry that instructs tools this process cannot call.
+    // In a sub-coder the allow-list is SUBCODER_ALLOWED_TOOLS, which has no
+    // evidence tools — and the research protocol's step 4 ("call EvidenceList
+    // before answering") is then unsatisfiable by construction (issue #97).
+    const allowed = allowedToolSet(lc);
+
     const scored: Array<{ score: number; entry: KnowledgeEntry }> = [];
     for (const e of entries.values()) {
+      if (!toolsAvailable(e.requiresTools, allowed)) continue;
       const s = scoreEntry(prompt, e);
       if (s >= MIN_SCORE_THRESHOLD) scored.push({ score: s, entry: e });
     }
