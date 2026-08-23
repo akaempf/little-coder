@@ -11,12 +11,6 @@ import { terminalColumns, truncateLineToWidth } from "../_shared/width.ts";
 
 const SPINNER = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 
-// pi renders a string-array widget through `content.slice(0, MAX_WIDGET_LINES)`
-// (interactive-mode.js; the cap is 10) and appends a "... (widget truncated)"
-// line past that. One line goes to our header and one may go to the
-// "+N earlier" summary, leaving 8 rows of sub-coders.
-const MAX_ROWS = 8;
-
 // Brand honey (matches branding/index.ts) + plain SGR status colors.
 const honey = (s: string) => `\x1b[38;2;225;90;31m${s}\x1b[39m`;
 const green = (s: string) => `\x1b[32m${s}\x1b[39m`;
@@ -128,36 +122,14 @@ export class SubCoderTracker {
 
     const total = this.totalSince !== undefined ? ` · ${fmtElapsed(now - this.totalSince)}` : "";
     const header = `${honey("sub-coders")} ${gray(`· ${done}/${items.length} done${total}`)}`;
-
-    // `begin()` appends and never resets, so a session with several dispatch
-    // turns accumulates rows indefinitely. pi slices a widget to
-    // MAX_WIDGET_LINES (10) and appends "... (widget truncated)", which would
-    // drop rows from the END — i.e. hide the sub-coders that are actually
-    // RUNNING behind a backlog of finished ones, which is exactly backwards.
-    // Show every running sub-coder, fill the rest with the most recently
-    // finished, and account for the remainder on one line.
-    const running = items.filter((r) => r.exitCode === -1);
-    const finished = items.filter((r) => r.exitCode !== -1);
-    // Indices rather than negative slice offsets on purpose: `slice(-0)` is
-    // `slice(0)`, i.e. the WHOLE array, so a naive `slice(-remainingSlots)`
-    // silently shows everything at exactly the moment there's no room left.
-    const runningShown =
-      running.length > MAX_ROWS ? running.slice(running.length - MAX_ROWS) : running;
-    const finishedSlots = MAX_ROWS - runningShown.length;
-    const finishedShown =
-      finishedSlots > 0 ? finished.slice(Math.max(0, finished.length - finishedSlots)) : [];
-    const shown = [...runningShown, ...finishedShown];
-    const hidden = items.length - shown.length;
-
-    const rows = shown.map((r) => {
-      const isRunning = r.exitCode === -1;
-      const icon = isRunning ? honey(frame) : r.exitCode === 0 ? green("✓") : red("✗");
+    const rows = items.map((r) => {
+      const running = r.exitCode === -1;
+      const icon = running ? honey(frame) : r.exitCode === 0 ? green("✓") : red("✗");
       const end = this.finishedAt.get(r.id) ?? now;
       const elapsed = fmtElapsed(end - (this.startedAt.get(r.id) ?? now));
       const activity = summarizeActivity(r);
       return `  ${icon} ${padEnd(r.label, labelWidth)}  ${gray(padEnd(elapsed, 5))}  ${gray(activity)}`;
     });
-    if (hidden > 0) rows.push(`  ${gray(`… +${hidden} earlier sub-coders`)}`);
 
     // Cap every line to the active terminal width — pi-tui throws if a custom
     // widget renders a line wider than the terminal (issue #48). The activity
@@ -165,7 +137,37 @@ export class SubCoderTracker {
     // errorMessage, which routinely runs ~200 chars), so without this each
     // failing dispatch turn would crash the whole session.
     const width = terminalColumns();
-    const lines = [header, ...rows].map((l) => truncateLineToWidth(l, width));
+    // Cap to 10 lines (pi's MAX_WIDGET_LINES) — header + at most 9 rows.
+    // Running sub-coders always stay visible; finished ones are summarized.
+    const MAX_LINES = 10;
+    const running = items.filter((r) => r.exitCode === -1);
+    const finished = items.filter((r) => r.exitCode !== -1);
+    const availableRows = MAX_LINES - 1; // header takes one line
+    let displayRows: typeof rows;
+    if (running.length >= availableRows) {
+      // Not enough room for all running + summary — show all running, no summary
+      displayRows = rows.slice(0, availableRows);
+    } else {
+      // Show all running + newest finished, summarize the rest
+      const summaryCount = availableRows - running.length;
+      if (summaryCount > 0 && finished.length > summaryCount) {
+        displayRows = [...rows.filter((_, i) => items[i].exitCode === -1), ...rows.slice(-summaryCount)];
+        displayRows.sort((a, b) => {
+          const aRunning = items[rows.indexOf(a)].exitCode === -1;
+          const bRunning = items[rows.indexOf(b)].exitCode === -1;
+          if (aRunning && !bRunning) return -1;
+          if (!aRunning && bRunning) return 1;
+          return 0;
+        });
+        const summaryIdx = displayRows.indexOf(rows[rows.length - summaryCount - 1]);
+        if (summaryIdx >= 0) {
+          displayRows.splice(summaryIdx, 0, `  ${gray(`+${finished.length - summaryCount} earlier sub-coders`)}`);
+        }
+      } else {
+        displayRows = rows.slice(0, availableRows);
+      }
+    }
+    const lines = [header, ...displayRows].map((l) => truncateLineToWidth(l, width));
     const frameKey = lines.join("\n");
     if (frameKey === this.lastFrame) return; // diff-guard: skip identical repaints
     this.lastFrame = frameKey;

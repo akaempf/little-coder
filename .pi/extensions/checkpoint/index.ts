@@ -8,19 +8,7 @@ import { homedir } from "node:os";
 // a file already tracked this session). Backups land in
 // ~/.little-coder/checkpoints/<session>/.
 
-export const tracked = new Map<string, Set<string>>(); // sessionId -> absolute paths
-
-// Read whichever key carries the destination path. pi's built-in `write`/`edit`
-// use `path`; older little-coder builds and some prompts use `file_path`. We
-// accept both so the pre-edit backup fires regardless of which write
-// implementation is in play — write-guard and read-guard-edit already do this,
-// and keying only on `file_path` meant the snapshot silently never ran for the
-// current pi tools (whose input uses `path`).
-export function checkpointPath(input: Record<string, unknown>): string | undefined {
-  if (typeof input?.path === "string") return input.path;
-  if (typeof input?.file_path === "string") return input.file_path;
-  return undefined;
-}
+const tracked = new Map<string, Set<string>>(); // sessionId -> absolute paths
 
 function checkpointDir(sessionId: string): string {
   const dir = join(homedir(), ".little-coder", "checkpoints", sessionId);
@@ -30,6 +18,12 @@ function checkpointDir(sessionId: string): string {
 
 function safeName(filePath: string): string {
   return filePath.replace(/[^A-Za-z0-9._-]/g, "_").slice(-200);
+}
+
+export function checkpointPath(input: any): string | undefined {
+  const p = typeof input?.path === "string" ? input.path : undefined;
+  const f = typeof input?.file_path === "string" ? input.file_path : undefined;
+  return p || f || undefined;
 }
 
 function backupIfNeeded(sessionId: string, filePath: string): void {
@@ -70,8 +64,8 @@ export default function (pi: ExtensionAPI) {
       return;
     }
     const input: any = (event as any).input ?? (event as any).args;
-    const filePath = checkpointPath(input ?? {});
-    if (filePath) {
+    const filePath = checkpointPath(input);
+    if (typeof filePath === "string") {
       backupIfNeeded(currentSessionId, filePath);
     }
   });

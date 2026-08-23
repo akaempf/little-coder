@@ -3,19 +3,15 @@ import { readdirSync, readFileSync, existsSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseSkillFile } from "../skill-inject/frontmatter.ts";
-import { injectionResult, makeDedupe } from "../_shared/inject.ts";
-import { allowedToolSet, toolsAvailable } from "../_shared/allowed-tools.ts";
+import { injectionResult } from "../_shared/inject.ts";
 
 // ── Knowledge-entry registry ────────────────────────────────────────────
 // Port of local/knowledge_augment.py. Loads skills/knowledge/*.md plus the
 // three root-level protocol skills (skills/protocols/*.md). Scores entries
 // against the user's prompt, selects top within budget, publishes
 // `requires_tools` on systemPromptOptions so skill-inject can include them.
-//
-// Like skill-inject, the selected entries ride in as a tail message rather
-// than a system-prompt append (issue #73 — see _shared/inject.ts).
 
-export interface KnowledgeEntry {
+interface KnowledgeEntry {
   topic: string;
   body: string;
   tokenCost: number;
@@ -27,7 +23,7 @@ const entries = new Map<string, KnowledgeEntry>();
 const cache = new Map<string, string>();
 let loaded = false;
 
-export const MIN_SCORE_THRESHOLD = 2.0;
+const MIN_SCORE_THRESHOLD = 2.0;
 const PER_ENTRY_CAP = 150;
 
 function dirs(): string[] {
@@ -63,7 +59,7 @@ function loadEntries(): void {
 }
 
 // ── Scoring (word=1.0, bigram/phrase=2.0) ───────────────────────────────
-export function scoreEntry(userText: string, e: KnowledgeEntry): number {
+function scoreEntry(userText: string, e: KnowledgeEntry): number {
   if (e.keywords.length === 0) return 0;
   const textLower = userText.toLowerCase();
   const words = new Set(textLower.split(/\s+/).filter(Boolean));
@@ -89,8 +85,6 @@ function buildBlock(selected: KnowledgeEntry[]): string {
 }
 
 export default function (pi: ExtensionAPI) {
-  const shouldInject = makeDedupe();
-
   pi.on("before_agent_start", async (event, ctx) => {
     loadEntries();
     if (entries.size === 0) return;
@@ -108,15 +102,8 @@ export default function (pi: ExtensionAPI) {
     const prompt = event.prompt ?? "";
     if (!prompt) return;
 
-    // Never inject an entry that instructs tools this process cannot call.
-    // In a sub-coder the allow-list is SUBCODER_ALLOWED_TOOLS, which has no
-    // evidence tools — and the research protocol's step 4 ("call EvidenceList
-    // before answering") is then unsatisfiable by construction (issue #97).
-    const allowed = allowedToolSet(lc);
-
     const scored: Array<{ score: number; entry: KnowledgeEntry }> = [];
     for (const e of entries.values()) {
-      if (!toolsAvailable(e.requiresTools, allowed)) continue;
       const s = scoreEntry(prompt, e);
       if (s >= MIN_SCORE_THRESHOLD) scored.push({ score: s, entry: e });
     }
@@ -148,9 +135,6 @@ export default function (pi: ExtensionAPI) {
       block = buildBlock(selected);
       cache.set(key, block);
     }
-
-    // Same entries as last turn? That copy is still in the conversation.
-    if (!shouldInject(block)) return;
 
     try {
       ctx.ui.notify(
