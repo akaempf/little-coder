@@ -9,12 +9,21 @@
         {
           "id": "qwen3.6-35b-a3b-uncensored",
           "name": "Qwen3.6-35B-A3B Uncensored (HauhauCS Q4_K_P, local llama.cpp)",
-          "reasoning": true,
-          "input": ["text"],
+          "reasoning": false,
+          "input": [
+            "text"
+          ],
           "contextWindow": 131072,
           "maxTokens": 8192,
-          "compat": { "thinkingFormat": "qwen" },
-          "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0 }
+          "compat": {
+            "thinkingFormat": "qwen"
+          },
+          "cost": {
+            "input": 0,
+            "output": 0,
+            "cacheRead": 0,
+            "cacheWrite": 0
+          }
         }
       ]
     }
