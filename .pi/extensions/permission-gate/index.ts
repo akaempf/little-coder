@@ -12,49 +12,20 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 //                                                merged with the built-in list.
 
 const BUILTIN_SAFE_PREFIXES: readonly string[] = [
-  // --- Basic file/line inspection ---
   "ls", "cat", "head", "tail", "wc", "pwd", "echo", "printf", "date",
-  // --- Env / identity ---
   "which", "type", "env", "printenv", "uname", "whoami", "id",
-  // --- File metadata / binary inspection ---
-  "file", "stat", "strings", "xxd", "hexdump", "od", "base64",
-  // --- Diff / compare ---
-  "diff", "cmp",
-  // --- Sort / uniq / text processing ---
-  "sort", "uniq", "tr", "awk", "xargs",
-  // --- Git (read-only) ---
   "git log", "git status", "git diff", "git show", "git branch",
   "git remote", "git stash list", "git tag",
-  // --- Git (full — also covers git pull, git push, git commit, etc.) ---
-  "git ",
-  // --- Search ---
   "find ", "grep ", "rg ", "ag ", "fd ", "sed ",
-  // --- Language runtimes ---
   "python ", "python3 ", "node ", "ruby ", "perl ",
-  // --- Package / tool inspection ---
   "pip show", "pip list", "npm list", "cargo metadata",
-  // --- Package / tool install & run ---
-  "npm ", "pip ", "brew ", "npx ",
-  // --- System info ---
-  "df ", "du ", "free ", "top -bn", "ps ", "vm_stat",
-  // --- Process control ---
-  "kill", "killall", "pkill", "pgrep", "time",
-  // --- Network ---
-  "curl ", "wget ", "ping", "nc", "ss", "netstat", "tor", "ssh", "scp", "sftp", "ssh-add",
-  // --- Database ---
-  "sqlite3 ",
-  // --- Compiler / build tools ---
-  "clang", "xcrun", "bash", "sh",
-  // --- Routine filesystem scaffolding ---
-  "cp ", "mv ", "mkdir ", "touch ", "ln ", "chmod ", "rm ",
-  // --- Container / AI ---
-  "docker ", "ollama ",
-  // --- Utility ---
-  "cd ", "sudo ", "dd ", "nmap ", "gh ", "aws ", "devbox ",
-  // --- macOS ---
-  "launchctl", "gitx", "diskutil", "sysctl", "sw_vers", "system_profiler",
-  "defaults", "open", "osascript", "plutil", "hdiutil", "mdfind",
-  "networksetup", "fdesetup ", "dscl ",
+  "df ", "du ", "free ", "top -bn", "ps ", "tmux ",
+  "curl -I", "curl --head",
+  // Routine filesystem scaffolding. Trailing space = word boundary, so
+  // "cp " matches "cp a b" but not "cpufetch". rm stays off the list by
+  // design; use LITTLE_CODER_BASH_ALLOW=rm if a deployment needs it.
+  "cp ", "mv ", "mkdir ", "touch ",
+  "scp ", "ssh ",
 ];
 
 // Trailing whitespace is meaningful — it acts as a word boundary in startsWith
