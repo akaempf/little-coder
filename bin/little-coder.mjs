@@ -378,7 +378,7 @@ const userArgs = process.argv.slice(2).filter(
 );
 const agentsMd = join(pkgRoot, "AGENTS.md");
 
-// Default the thinking level to "medium" for interactive sessions (pi's own
+// Default the thinking level to "off" for interactive sessions (pi's own
 // default is "minimal"). Only when the user hasn't asked for a level themselves
 // (--thinking, or the --model "provider/id:level" shorthand) and this isn't a
 // headless/sub-coder run (--mode rpc/json) where the caller controls thinking.
@@ -386,7 +386,7 @@ const userPickedThinking =
   userArgs.includes("--thinking") ||
   userArgs.some((a, i) => a === "--model" && /:/.test(userArgs[i + 1] || ""));
 const headless = isSubagent || userArgs.includes("--mode") || userArgs.includes("-p");
-const thinkingArgs = !userPickedThinking && !headless ? ["--thinking", "medium"] : [];
+const thinkingArgs = !userPickedThinking && !headless ? ["--thinking", "off"] : [];
 
 // ---- 6b. Default model on bare launch (issue #65) ----
 // If models.json declares a top-level "default": "provider/id" and the user
