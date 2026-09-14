@@ -95,34 +95,212 @@ export default function (pi: ExtensionAPI) {
       try {
         const controller = new AbortController();
         const timer = setTimeout(() => controller.abort(), 30_000);
-        const url = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`;
-        const res = await fetch(url, {
-          headers: { "User-Agent": "Mozilla/5.0 (compatible)" },
-          redirect: "follow",
-          signal: controller.signal,
-        });
-        clearTimeout(timer);
-        const body = await res.text();
-        const titleRe = /class="result__title"[^>]*>[\s\S]*?<a[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/g;
-        const snippetRe = /class="result__snippet"[^>]*>([\s\S]*?)<\/div>/g;
+
         const titles: Array<{ link: string; title: string }> = [];
-        let m: RegExpExecArray | null;
-        while ((m = titleRe.exec(body)) && titles.length < 8) {
-          titles.push({ link: m[1], title: m[2].replace(/<[^>]+>/g, "").trim() });
-        }
         const snippets: string[] = [];
-        while ((m = snippetRe.exec(body)) && snippets.length < 8) {
-          snippets.push(m[1].replace(/<[^>]+>/g, "").trim());
+
+        // Strategy 1: Try DDG lite with cookie session
+        try {
+          const cookieRes = await fetch("https://lite.duckduckgo.com/lite/", {
+            headers: { "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36" },
+            redirect: "follow",
+            signal: controller.signal,
+          });
+          const setCookie = cookieRes.headers.get("set-cookie");
+          let cookieHeader = "";
+          if (setCookie) {
+            const cookieName = setCookie.split(";")[0].split("=")[0];
+            const cookieVal = setCookie.split(";")[0].split("=")[1];
+            cookieHeader = `${cookieName}=${cookieVal}`;
+          }
+
+          const searchRes = await fetch(
+            `https://lite.duckduckgo.com/lite/?q=${encodeURIComponent(query)}`,
+            {
+              headers: {
+                "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
+                ...(cookieHeader ? { Cookie: cookieHeader } : {}),
+              },
+              redirect: "follow",
+              signal: controller.signal,
+            },
+          );
+          const body = await searchRes.text();
+
+          // Parse DDG lite results: <a class="result__a" href="...">title</a>
+          const titleRe = /<a[^>]*class="[^"]*result__a[^"]*"[^>]*href="([^"]*)"[^>]*>([\s\S]*?)<\/a>/gi;
+          const snippetRe = /<a[^>]*class="[^"]*result__snippet[^"]*"[^>]*href="[^"]*"[^>]*>([\s\S]*?)<\/a>/gi;
+
+          let m: RegExpExecArray | null;
+          while ((m = titleRe.exec(body)) && titles.length < 8) {
+            const title = m[2].replace(/<[^>]+>/g, "").replace(/&nbsp;/g, " ").trim();
+            if (title) titles.push({ link: m[1], title });
+          }
+          while ((m = snippetRe.exec(body)) && snippets.length < 8) {
+            const snippet = m[1].replace(/<[^>]+>/g, "").replace(/&nbsp;/g, " ").trim();
+            if (snippet) snippets.push(snippet);
+          }
+        } catch {
+          // Fall through to strategy 2
         }
+
+        // Strategy 2: Fallback to html.duckduckgo.com with multiple regex patterns
         if (titles.length === 0) {
+          try {
+            const htmlRes = await fetch(
+              `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`,
+              {
+                headers: {
+                  "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
+                },
+                redirect: "follow",
+                signal: controller.signal,
+              },
+            );
+            const body = await htmlRes.text();
+
+            // Pattern 1: result__title / result__snippet (older format)
+            let titleRe = /class="result__title"[^>]*>[\s\S]*?<a[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/g;
+            let snippetRe = /class="result__snippet"[^>]*>([\s\S]*?)<\/div>/g;
+            let m: RegExpExecArray | null;
+            while ((m = titleRe.exec(body)) && titles.length < 8) {
+              titles.push({ link: m[1], title: m[2].replace(/<[^>]+>/g, "").trim() });
+            }
+            while ((m = snippetRe.exec(body)) && snippets.length < 8) {
+              snippets.push(m[1].replace(/<[^>]+>/g, "").trim());
+            }
+
+            // Pattern 2: result-link / result-snippet (newer format)
+            if (titles.length === 0) {
+              titleRe = /class="result-link"[^>]*>[\s\S]*?<a[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/g;
+              snippetRe = /class="result-snippet"[^>]*>([\s\S]*?)<\/span>/g;
+              while ((m = titleRe.exec(body)) && titles.length < 8) {
+                titles.push({ link: m[1], title: m[2].replace(/<[^>]+>/g, "").trim() });
+              }
+              while ((m = snippetRe.exec(body)) && snippets.length < 8) {
+                snippets.push(m[1].replace(/<[^>]+>/g, "").trim());
+              }
+            }
+
+            // Pattern 3: Generic <a> tags with result links
+            if (titles.length === 0) {
+              titleRe = /<a[^>]*href="https?:\/\/[^\"]*"[^>]*>([\s\S]*?)<\/a>/g;
+              while ((m = titleRe.exec(body)) && titles.length < 8) {
+                const title = m[1].replace(/<[^>]+>/g, "").replace(/&nbsp;/g, " ").trim();
+                if (title && title.length > 3 && title.length < 200) {
+                  const hrefMatch = body.substring(Math.max(0, m.index - 200), m.index).match(/href="(https?:\/\/[^\"]*)"/);
+                  titles.push({ link: hrefMatch ? hrefMatch[1] : "#", title });
+                }
+              }
+            }
+          } catch {
+            // Ignore HTML fallback errors
+          }
+        }
+
+        clearTimeout(timer);
+
+        if (titles.length === 0) {
+          // Strategy 3: Last resort — DDG JSON API for knowledge results
+          try {
+            const jsonRes = await fetch(
+              `https://api.duckduckgo.com/?q=${encodeURIComponent(query)}&format=json&no_redirect=1&no_html=1`,
+              { signal: controller.signal },
+            );
+            const json = await jsonRes.json();
+            if (json.AbstractText && json.AbstractText.length > 0) {
+              return {
+                content: [{ type: "text", text: `**${json.Heading || query}**\n${json.AbstractText}\nSource: ${json.AbstractURL || "DuckDuckGo"}` }],
+                details: {},
+              };
+            }
+          } catch {
+            // Ignore JSON API errors
+          }
           return {
             content: [{ type: "text", text: "No results found" }],
             details: {},
           };
         }
+
         const out = titles
           .map((t, i) => `**${t.title}**\n${t.link}\n${snippets[i] ?? ""}`)
           .join("\n\n");
+        return { content: [{ type: "text", text: out }], details: {} };
+      } catch (e) {
+        return {
+          content: [{ type: "text", text: `Error: ${(e as Error).message}` }],
+          details: {},
+          isError: true,
+        };
+      }
+    },
+  });
+
+  // ── exa-websearch ───────────────────────────────────────────────────────
+  pi.registerTool({
+    name: "exa-websearch",
+    label: "ExaWebSearch",
+    description: "Search the web via Exa AI and return the top results as Markdown. Requires EXA_API_KEY environment variable.",
+    parameters: Type.Object({
+      query: Type.String({ description: "Search query" }),
+      numResults: Type.Optional(Type.Number({ description: "Number of results (default 8, max 20)" })),
+    }),
+    async execute(_id, { query, numResults = 8 }) {
+      try {
+        const apiKey = process.env.EXA_API_KEY;
+        if (!apiKey) {
+          return {
+            content: [{ type: "text", text: "Error: EXA_API_KEY environment variable not set. Set it to use Exa search." }],
+            details: {},
+            isError: true,
+          };
+        }
+
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), 30_000);
+
+        const res = await fetch("https://api.exa.ai/search", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "x-api-key": apiKey,
+          },
+          body: JSON.stringify({
+            query,
+            numResults: Math.min(Math.max(numResults, 1), 20),
+            useAutoprompt: false,
+            type: "neural",
+          }),
+          redirect: "follow",
+          signal: controller.signal,
+        });
+
+        clearTimeout(timer);
+
+        if (!res.ok) {
+          const errText = await res.text();
+          return {
+            content: [{ type: "text", text: `Error: Exa API returned HTTP ${res.status}: ${errText}` }],
+            details: {},
+            isError: true,
+          };
+        }
+
+        const data = await res.json();
+
+        if (!data.results || data.results.length === 0) {
+          return {
+            content: [{ type: "text", text: "No results found" }],
+            details: {},
+          };
+        }
+
+        const out = data.results
+          .slice(0, numResults)
+          .map((r: any) => `**${r.title || "Untitled"}**\n${r.url}\n${r.text?.substring(0, 300) ?? ""}`)
+          .join("\n\n");
+
         return { content: [{ type: "text", text: out }], details: {} };
       } catch (e) {
         return {

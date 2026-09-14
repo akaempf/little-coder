@@ -76,6 +76,7 @@ TypeScript is loaded directly — no build step. The bundled extensions in [`.pi
 | Add per-turn context | [`skill-inject`](../.pi/extensions/skill-inject) — and read [`_shared/inject.ts`](../.pi/extensions/_shared/inject.ts) first |
 | Add a hotkey + panel | [`shortcuts-help`](../.pi/extensions/shortcuts-help), [`plan-mode`](../.pi/extensions/plan-mode) |
 | Add a model provider | [`llama-cpp-provider`](../.pi/extensions/llama-cpp-provider) |
+| Feed turns to self-monitoring MCP | [`quality-monitor`](../.pi/extensions/quality-monitor) — calls `notifyMonitor` on every turn, POSTs to `http://127.0.0.1:8765/respond` |
 
 Two things worth knowing before you write one:
 

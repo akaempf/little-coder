@@ -13,6 +13,21 @@ let previousToolCalls: ToolCall[] = [];
 let consecutiveFailures = 0;
 const MAX_CONSECUTIVE_CORRECTIONS = 2;
 
+// Self-monitoring: feed tool calls + responses to the MCP monitor for semantic loop detection.
+const MONITOR_URL = "http://127.0.0.1:8765";
+async function notifyMonitor(userInput: string, agentResponse: string, toolCalls: string) {
+  try {
+    await fetch(`${MONITOR_URL}/respond`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ user_input: userInput, agent_response: agentResponse }),
+      signal: AbortSignal.timeout(3000),
+    });
+  } catch {
+    // Monitor may be down or unreachable — non-critical
+  }
+}
+
 export default function (pi: ExtensionAPI) {
   // Reset failure counter on agent_end so an abort+followUp doesn't enter
   // the next turn already over the threshold. Keep previousToolCalls so that
@@ -57,6 +72,14 @@ export default function (pi: ExtensionAPI) {
     const currentCalls: ToolCall[] = content
       .filter((c: any) => c?.type === "toolCall")
       .map((c: any) => ({ name: c.name, input: c.arguments ?? c.input ?? {} }));
+
+    // Feed this turn to the self-monitoring MCP for semantic loop detection.
+    const toolCallNames = currentCalls.map((c) => c.name).join(", ");
+    notifyMonitor(
+      `turn ${event.turnIndex}: ${text.substring(0, 200)}`,
+      text + "\n" + toolCallNames,
+      JSON.stringify(currentCalls),
+    );
 
     const verdict = assessResponse(text, currentCalls, previousToolCalls, knownTools);
 

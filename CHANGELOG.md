@@ -1,6 +1,9 @@
 # Changelog
 
 All notable changes to little-coder are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and little-coder's public interface (CLI, providers, tools, skills) follows semver starting at `v0.0.1` post-rename.
+## [Unreleased]
+### Added
+- **Self-monitoring MCP integration** — The quality-monitor extension now feeds every turn to the self-monitoring agent at `http://127.0.0.1:8765/respond` via a `notifyMonitor` helper. The monitor tracks semantic repetition (threshold 0.82), fact memory, topic drift, and confidence scoring across turns. Non-critical: if the monitor is unreachable the harness continues normally.
 
 ## [v1.18.0] - 2026-08-22
 

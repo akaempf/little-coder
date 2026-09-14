@@ -1,5 +1,7 @@
 {
-  "excludeServers": ["sqz"],
+  "excludeServers": [
+    "sqz"
+  ],
   "mcpServers": {
     "github": {
       "command": "mcp-server-github",
@@ -102,11 +104,7 @@
         "typescript docs",
         "python docs"
       ],
-      "excludeTools": [
-        "WebSearch",
-        "exa-websearch",
-        "WebFetch"
-      ],
+      "excludeTools": [],
       "autoActivate": false
     },
     "aws-api": {
@@ -152,8 +150,10 @@
     },
     "engram": {
       "command": "engram",
-      "args": ["mcp"],
-      "description": "structured memory — SQLite+FTS5 observations, sessions, timeline",
+      "args": [
+        "mcp"
+      ],
+      "description": "structured memory \u2014 SQLite+FTS5 observations, sessions, timeline",
       "triggerKeywords": [
         "save-session",
         "save session",
