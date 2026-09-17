@@ -23,7 +23,7 @@
     },
     "model_profiles": {
       "llamacpp/qwen3-coder:30b": {
-        "context_limit": 49152,
+        "context_limit": 131072,
         "max_tokens": 8192,
         "thinking_budget": 2048,
         "skill_token_budget": 300,
