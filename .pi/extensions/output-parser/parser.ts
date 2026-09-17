@@ -33,6 +33,70 @@ export function escapeNewlinesInJsonStrings(text: string): string {
   return out.join("");
 }
 
+/** Every brace-balanced `{…}` substring of `s`, in order, tracking nesting depth
+ *  and string quoting/escapes. Nested objects are returned as part of their
+ *  OUTER object, never separately, and a brace inside a string value neither
+ *  opens nor closes anything. Stops at the first `{` that never closes. */
+export function balancedObjects(s: string): string[] {
+  const out: string[] = [];
+  let i = 0;
+  while (i < s.length) {
+    const start = s.indexOf("{", i);
+    if (start < 0) break;
+    let depth = 0;
+    let quote: string | null = null;
+    let esc = false;
+    let closed = -1;
+    for (let j = start; j < s.length; j++) {
+      const c = s[j];
+      if (quote) {
+        if (esc) esc = false;
+        else if (c === "\\") esc = true;
+        else if (c === quote) quote = null;
+        continue;
+      }
+      if (c === "'" || c === '"') quote = c;
+      else if (c === "{") depth++;
+      else if (c === "}" && --depth === 0) { closed = j; break; }
+    }
+    if (closed < 0) break; // unterminated: nothing further can balance either
+    out.push(s.slice(start, closed + 1));
+    i = closed + 1;
+  }
+  return out;
+}
+
+/** The first brace-balanced `{…}` substring of `s`, or null if none closes.
+ *  Unlike a `/\{[^{}]*\}/` regex it returns the OUTER object even when it nests
+ *  further objects, so a valid tool call like `{"name":"Write","input":{…}}`
+ *  isn't lost to its inner `input` fragment when trailing text follows it. */
+export function firstBalancedObject(s: string): string | null {
+  return balancedObjects(s)[0] ?? null;
+}
+
+/** The argument object of a parsed tool call, whatever the model called it.
+ *  `input` is pi's own name, `parameters`/`args` are common in hand-written
+ *  prompts, and `arguments` is what the OpenAI tool-call schema uses, which is
+ *  the shape a model reaches for when it writes a call as text instead of
+ *  emitting a native one (issue #117). OpenAI also serializes `arguments` as a
+ *  JSON *string*, so a string is parsed rather than dropped. */
+export function toolCallInput(data: Record<string, unknown>): Record<string, unknown> {
+  const raw = data.input ?? data.parameters ?? data.arguments ?? data.args;
+  if (typeof raw === "string") {
+    try {
+      const parsed = JSON.parse(raw);
+      return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+        ? (parsed as Record<string, unknown>)
+        : {};
+    } catch {
+      return {};
+    }
+  }
+  return raw && typeof raw === "object" && !Array.isArray(raw)
+    ? (raw as Record<string, unknown>)
+    : {};
+}
+
 export function repairJson(raw: string): Record<string, unknown> {
   const trimmed = raw.trim();
   if (!trimmed) return {};
@@ -61,11 +125,12 @@ export function repairJson(raw: string): Record<string, unknown> {
   try {
     return JSON.parse(fixed);
   } catch {}
-  // 6. extract first JSON object
-  const m = fixed.match(/\{[^{}]*\}/);
-  if (m) {
+  // 6. extract the first brace-balanced object (nesting- and quote-aware, so a
+  //    valid call isn't lost to an inner fragment when trailing text follows).
+  const obj = firstBalancedObject(fixed);
+  if (obj) {
     try {
-      return JSON.parse(m[0]);
+      return JSON.parse(obj);
     } catch {}
   }
   return { _raw: raw };
@@ -99,7 +164,7 @@ export function parseTextToolCalls(text: string): ExtractedCall[] {
       calls.push({
         id: `call_text_${calls.length}`,
         name: data.name,
-        input: (data.input ?? data.parameters ?? data.args ?? {}) as Record<string, unknown>,
+        input: toolCallInput(data),
         format: "fenced",
       });
     }
@@ -113,22 +178,42 @@ export function parseTextToolCalls(text: string): ExtractedCall[] {
       calls.push({
         id: `call_text_${calls.length}`,
         name: data.name,
-        input: (data.input ?? data.parameters ?? data.args ?? {}) as Record<string, unknown>,
+        input: toolCallInput(data),
         format: "tag",
       });
     }
   }
 
-  // Pattern 3: bare JSON object with "name"+"input"
+  // Pattern 3: a bare JSON object carrying a "name".
+  //
+  // This used to be `/\{[^{}]*"name"\s*:\s*"(\w+)"[^{}]*\}/g`, whose `[^{}]*`
+  // excludes braces outright, so it could never match a call whose arguments
+  // are themselves an object, which is the single most common way a model
+  // writes one: `{"name": "read", "arguments": {"path": "foo.py"}}` (issue
+  // #117). The nudge that asks the model to re-issue natively is driven off
+  // this list, so a miss here is silent: nothing runs and nothing is reported.
   if (calls.length === 0) {
-    const bareRe = /\{[^{}]*"name"\s*:\s*"(\w+)"[^{}]*\}/g;
-    while ((m = bareRe.exec(text))) {
-      const data = repairJson(m[0]);
+    for (const chunk of balancedObjects(text)) {
+      if (!/"name"\s*:\s*"/.test(chunk)) continue;
+      const data = repairJson(chunk);
+      // A nested object is only accepted when it also carries an argument key.
+      // Bare `"name"` plus arbitrary keys stays limited to FLAT objects, as
+      // before: matching any `{...,"name":...,...}` in prose is how #96's false
+      // positives happen, and a model discussing a config blob with a `name`
+      // field must not be read as calling a tool. Requiring `name` AND one of
+      // input/parameters/arguments/args is what makes the nested shape safe.
+      const nested = /[{[]/.test(chunk.slice(1, -1));
+      const hasArgs =
+        data.input !== undefined ||
+        data.parameters !== undefined ||
+        data.arguments !== undefined ||
+        data.args !== undefined;
+      if (nested && !hasArgs) continue;
       if (typeof data.name === "string" && data.name) {
         calls.push({
           id: `call_text_${calls.length}`,
           name: data.name,
-          input: (data.input ?? data.parameters ?? {}) as Record<string, unknown>,
+          input: toolCallInput(data),
           format: "bare",
         });
       }

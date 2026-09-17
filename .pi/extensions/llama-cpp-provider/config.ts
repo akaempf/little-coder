@@ -232,10 +232,23 @@ export function windowChange(
   return { from: registeredCtx, to: probed };
 }
 
+/** models.json stores apiKey as an ENV_VAR_NAME (see schema above); a value
+ *  that names no env var is treated as a literal key (llama-swap setups often
+ *  paste the raw key). Returns undefined when nothing usable is set. */
+export function resolveApiKey(configured: string | undefined, env: NodeJS.ProcessEnv = process.env): string | undefined {
+  if (!configured) return undefined;
+  return env[configured] ?? configured;
+}
+
 export interface ProbeDeps {
   fetchImpl?: typeof fetch;
   timeoutMs?: number;
   url?: string;
+  /** Sent as a Bearer token — /props sits behind the server's --api-key
+   *  middleware (llama.cpp and llama-swap), so an unauthenticated probe
+   *  gets 401 {"error":{"message":"Invalid API Key",...}} and the caller
+   *  silently falls back to the declared context window. */
+  apiKey?: string;
 }
 
 /** Ask a llama.cpp server for its live context window via /props. Returns
@@ -246,10 +259,12 @@ export async function probeContextWindow(baseUrl: string, deps: ProbeDeps = {}):
   const fetchImpl = deps.fetchImpl ?? fetch;
   const url = deps.url ?? propsUrlFor(baseUrl);
   const timeoutMs = deps.timeoutMs ?? 1500;
+  const headers: Record<string, string> = {};
+  if (deps.apiKey) headers.Authorization = `Bearer ${deps.apiKey}`;
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), timeoutMs);
   try {
-    const res = await fetchImpl(url, { signal: ctrl.signal });
+    const res = await fetchImpl(url, { signal: ctrl.signal, headers });
     if (!res.ok) return undefined;
     return contextWindowFromProps(await res.json());
   } catch {
@@ -257,4 +272,124 @@ export async function probeContextWindow(baseUrl: string, deps: ProbeDeps = {}):
   } finally {
     clearTimeout(timer);
   }
+}
+
+/** Router-mode fallback. llama-swap answers root /props itself ("role":"router",
+ *  default_generation_settings.n_ctx = 0), so the /props probe finds nothing.
+ *  Its /v1/models listing DOES carry per-model data: meta.n_ctx once the model
+ *  is loaded, otherwise --ctx-size in the recorded launch args. Returns
+ *  undefined when nothing usable is found. */
+export function contextWindowFromModelList(json: unknown, modelId?: string): number | undefined {
+  const j = json as { data?: any[] } | null;
+  const models = Array.isArray(j?.data) ? j.data : [];
+  const pick =
+    (modelId ? models.find((m) => m && m.id === modelId) : undefined) ??
+    (models.length === 1 ? models[0] : undefined);
+  if (!pick) return undefined;
+  const metaN = Number(pick.meta?.n_ctx);
+  if (Number.isFinite(metaN) && metaN > 0) return metaN;
+  const args: string[] = Array.isArray(pick.status?.args) ? pick.status.args : [];
+  const i = args.indexOf("--ctx-size");
+  const fromArgs = i >= 0 ? Number(args[i + 1]) : NaN;
+  return Number.isFinite(fromArgs) && fromArgs > 0 ? fromArgs : undefined;
+}
+
+/** Probe the router's /v1/models for the live context window of one model.
+ *  The key is sent even though llama.cpp leaves this endpoint open — a
+ *  self-hosted reverse proxy in front may still require it.
+ *  Same best-effort contract as probeContextWindow: never throws. */
+export async function probeContextWindowViaModels(
+  baseUrl: string,
+  deps: ProbeDeps & { modelId?: string } = {},
+): Promise<number | undefined> {
+  const fetchImpl = deps.fetchImpl ?? fetch;
+  const root = baseUrl.replace(/\/+$/, "").replace(/\/v1$/, "");
+  const headers: Record<string, string> = {};
+  if (deps.apiKey) headers.Authorization = `Bearer ${deps.apiKey}`;
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), deps.timeoutMs ?? 1500);
+  try {
+    const res = await fetchImpl(`${root}/v1/models`, { signal: ctrl.signal, headers });
+    if (!res.ok) return undefined;
+    return contextWindowFromModelList(await res.json(), deps.modelId);
+  } catch {
+    return undefined;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/** Every model a router-mode endpoint actually serves, as registry entries.
+ *
+ *  models.json is a curated list of models little-coder knows how to talk to.
+ *  Behind a router (llama-swap, `llama-server --models-preset`) the endpoint
+ *  serves whatever presets the user configured, and those ids are not in
+ *  models.json, so `--list-models` never showed them and selecting one failed
+ *  with "model not found" (issue #112, @NoelJacob: 13 presets on the server,
+ *  none of them listed).
+ *
+ *  Deliberately returns nothing for a SINGLE-model listing. That is the
+ *  ordinary local case, where models.json's friendly alias (`qwen3.6-35b-a3b`)
+ *  is the name the user wants, and adding the raw served id next to it
+ *  (`Qwen3.6-35B-A3B-UD-Q4_K_M.gguf`) would be duplicate noise for everyone.
+ *  More than one model IS a router, which is exactly the case this exists for.
+ *
+ *  `declared` ids are never shadowed: discovery only ADDS. */
+export function discoveredModels(
+  json: unknown,
+  declared: ReadonlyArray<{ id: string }>,
+  fallbackWindow: number,
+): ProviderModelEntry[] {
+  const j = json as { data?: any[] } | null;
+  const models = Array.isArray(j?.data) ? j.data : [];
+  if (models.length < 2) return [];
+  const known = new Set(declared.map((m) => m.id));
+  const out: ProviderModelEntry[] = [];
+  for (const m of models) {
+    const id = typeof m?.id === "string" ? m.id : "";
+    if (!id || known.has(id)) continue;
+    known.add(id);
+    // Reuse the same defaults a models.json entry gets, so a discovered model
+    // is shaped exactly like a declared one.
+    out.push(
+      fillModelDefaults(
+        { id, contextWindow: contextWindowFromModelList({ data: [m] }, id) ?? fallbackWindow },
+        "llamacpp",
+        out.length,
+      ),
+    );
+  }
+  return out;
+}
+
+/** Fetch <root>/v1/models and turn it into registry entries. Best-effort. */
+export async function probeServedModels(
+  baseUrl: string,
+  declared: ReadonlyArray<{ id: string }>,
+  fallbackWindow: number,
+  deps: ProbeDeps = {},
+): Promise<ProviderModelEntry[]> {
+  const fetchImpl = deps.fetchImpl ?? fetch;
+  const root = baseUrl.replace(/\/+$/, "").replace(/\/v1$/, "");
+  const headers: Record<string, string> = {};
+  if (deps.apiKey) headers.Authorization = `Bearer ${deps.apiKey}`;
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), deps.timeoutMs ?? 1500);
+  try {
+    const res = await fetchImpl(`${root}/v1/models`, { signal: ctrl.signal, headers });
+    if (!res.ok) return [];
+    return discoveredModels(await res.json(), declared, fallbackWindow);
+  } catch {
+    return [];
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/** Try /props first (direct llama.cpp), then /v1/models (router mode). */
+export async function probeContextWindowAuto(
+  baseUrl: string,
+  deps: ProbeDeps & { modelId?: string } = {},
+): Promise<number | undefined> {
+  return (await probeContextWindow(baseUrl, deps)) ?? (await probeContextWindowViaModels(baseUrl, deps));
 }

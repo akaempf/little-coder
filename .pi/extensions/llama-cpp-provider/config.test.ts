@@ -10,8 +10,12 @@ import {
   mergeProviders,
   resolveOverridePath,
   propsUrlFor,
+  contextWindowFromModelList,
+  discoveredModels,
   contextWindowFromProps,
   probeContextWindow,
+  probeContextWindowViaModels,
+  resolveApiKey,
   withContextWindow,
   formatContextWindow,
   windowChange,
@@ -377,6 +381,95 @@ describe("probeContextWindow", () => {
     expect(seen).toBe("http://other/props");
     expect(got).toBe(40960);
   });
+
+  it("sends the api key as a Bearer token (--api-key servers protect /props)", async () => {
+    let auth: string | undefined;
+    const fetchImpl = (async (_u: string, init?: RequestInit) => {
+      auth = (init?.headers as Record<string, string>)?.Authorization;
+      return okRes({ default_generation_settings: { n_ctx: 131072 } });
+    }) as unknown as typeof fetch;
+    const got = await probeContextWindow("http://x:8888/v1", { fetchImpl, apiKey: "sekrit" });
+    expect(auth).toBe("Bearer sekrit");
+    expect(got).toBe(131072);
+  });
+
+  it("sends no Authorization header when no key is available", async () => {
+    let headers: Record<string, string> | undefined;
+    const fetchImpl = (async (_u: string, init?: RequestInit) => {
+      headers = init?.headers as Record<string, string>;
+      return okRes({ n_ctx: 8192 });
+    }) as unknown as typeof fetch;
+    await probeContextWindow("http://x:8888/v1", { fetchImpl });
+    expect(headers?.Authorization).toBeUndefined();
+  });
+});
+
+describe("resolveApiKey", () => {
+  it("resolves an env-var name to its value", () => {
+    expect(resolveApiKey("LLAMACPP_API_KEY", { LLAMACPP_API_KEY: "sk-1" })).toBe("sk-1");
+  });
+  it("treats a value that names no env var as a literal key", () => {
+    expect(resolveApiKey("raw-key-123", {})).toBe("raw-key-123");
+  });
+  it("returns undefined when nothing is configured", () => {
+    expect(resolveApiKey(undefined, {})).toBeUndefined();
+    expect(resolveApiKey("", {})).toBeUndefined();
+  });
+});
+
+describe("contextWindowFromModelList (llama-swap router mode)", () => {
+  const loaded = {
+    id: "qwen-coder",
+    status: { value: "loaded", args: ["llama-server.exe", "--alias", "qwen-coder", "--ctx-size", "200000"] },
+    meta: { n_ctx: 200192, n_ctx_train: 262144 },
+  };
+  const unloaded = {
+    id: "ornith_coder",
+    status: { value: "unloaded", args: ["llama-server.exe", "--ctx-size", "200000", "--alias", "ornith_coder"] },
+  };
+  const router = { data: [unloaded, loaded], object: "list" };
+
+  it("prefers meta.n_ctx of the matching model when loaded", () => {
+    expect(contextWindowFromModelList(router, "qwen-coder")).toBe(200192);
+  });
+  it("falls back to --ctx-size in the launch args when unloaded", () => {
+    expect(contextWindowFromModelList(router, "ornith_coder")).toBe(200000);
+  });
+  it("ignores a router /props-shaped payload with no usable n_ctx", () => {
+    expect(contextWindowFromModelList({ default_generation_settings: { n_ctx: 0 } }, "qwen-coder")).toBeUndefined();
+  });
+  it("returns undefined when the model id is unknown among several", () => {
+    expect(contextWindowFromModelList(router, "nope")).toBeUndefined();
+  });
+});
+
+describe("probeContextWindowViaModels", () => {
+  const listRes = (body: unknown) => ({ ok: true, json: async () => body }) as Response;
+
+  it("hits <root>/v1/models with the Bearer key and reads meta.n_ctx", async () => {
+    let seenUrl = "";
+    let auth: string | undefined;
+    const fetchImpl = (async (u: string, init?: RequestInit) => {
+      seenUrl = u;
+      auth = (init?.headers as Record<string, string>)?.Authorization;
+      return listRes({ data: [{ id: "qwen-coder", meta: { n_ctx: 200192 } }] });
+    }) as unknown as typeof fetch;
+    const got = await probeContextWindowViaModels("http://127.0.0.1:9090/v1", {
+      fetchImpl,
+      apiKey: "sekrit",
+      modelId: "qwen-coder",
+    });
+    expect(seenUrl).toBe("http://127.0.0.1:9090/v1/models");
+    expect(auth).toBe("Bearer sekrit");
+    expect(got).toBe(200192);
+  });
+
+  it("returns undefined on a non-OK response or a throw", async () => {
+    const bad = (async () => ({ ok: false })) as unknown as typeof fetch;
+    expect(await probeContextWindowViaModels("http://x/v1", { fetchImpl: bad })).toBeUndefined();
+    const throwing = (async () => { throw new Error("ECONNREFUSED"); }) as unknown as typeof fetch;
+    expect(await probeContextWindowViaModels("http://x/v1", { fetchImpl: throwing })).toBeUndefined();
+  });
 });
 
 // ── swap-time re-probe helpers (issue #54) ──────────────────────────────────
@@ -424,5 +517,46 @@ describe("windowChange", () => {
   });
   it("surfaces a first-known window even when nothing was registered yet", () => {
     expect(windowChange(undefined, 32768)).toEqual({ from: undefined, to: 32768 });
+  });
+});
+
+describe("discoveredModels (router mode, issue #112)", () => {
+  const declared = [{ id: "qwen3.6-35b-a3b" }];
+  const router = {
+    data: [
+      { id: "LFM2.5-8B-A1B-GGUF", meta: { n_ctx: 65536 } },
+      { id: "qwen-coder", status: { value: "unloaded", args: ["llama-server", "--ctx-size", "200000"] } },
+      { id: "qwen3.6-35b-a3b", meta: { n_ctx: 131072 } },
+    ],
+  };
+
+  it("adds the served ids models.json has never heard of", () => {
+    const got = discoveredModels(router, declared, 32768);
+    expect(got.map((m) => m.id)).toEqual(["LFM2.5-8B-A1B-GGUF", "qwen-coder"]);
+  });
+
+  it("takes each model's own window, falling back when it has none", () => {
+    const got = discoveredModels(router, declared, 32768);
+    expect(got[0].contextWindow).toBe(65536);   // meta.n_ctx
+    expect(got[1].contextWindow).toBe(200000);  // --ctx-size, unloaded
+    expect(discoveredModels({ data: [{ id: "a" }, { id: "b" }] }, [], 32768)[0].contextWindow).toBe(32768);
+  });
+
+  it("never shadows a declared id", () => {
+    expect(discoveredModels(router, declared, 32768).some((m) => m.id === "qwen3.6-35b-a3b")).toBe(false);
+  });
+
+  it("stays out of the way of an ordinary single-model server", () => {
+    // The common local case: one model, whose raw served id differs from the
+    // friendly models.json alias. Registering both would be duplicate noise.
+    expect(discoveredModels({ data: [{ id: "Qwen3.6-35B-A3B-UD-Q4_K_M.gguf", meta: { n_ctx: 131072 } }] }, declared, 32768)).toEqual([]);
+    expect(discoveredModels({ data: [] }, declared, 32768)).toEqual([]);
+    expect(discoveredModels(null, declared, 32768)).toEqual([]);
+  });
+
+  it("shapes a discovered model like a declared one", () => {
+    const m = discoveredModels(router, declared, 32768)[0];
+    expect(m).toMatchObject({ name: "LFM2.5-8B-A1B-GGUF", reasoning: false, input: ["text"], maxTokens: 4096 });
+    expect(m.cost).toEqual({ input: 0, output: 0, cacheRead: 0, cacheWrite: 0 });
   });
 });
