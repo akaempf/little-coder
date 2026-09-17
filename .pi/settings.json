@@ -57,6 +57,14 @@
           }
         }
       },
+      "llamacpp/qwen3.6-35b-a3b-uncensored": {
+        "context_limit": 131072,
+        "max_tokens": 8192,
+        "thinking_budget": 8192,
+        "skill_token_budget": 300,
+        "knowledge_token_budget": 200,
+        "temperature": 0.3
+      },
       "llamacpp/qwen3.5-9b": {
         "max_tokens": 4096,
         "thinking_budget": 4096,
