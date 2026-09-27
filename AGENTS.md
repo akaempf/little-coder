@@ -40,7 +40,7 @@ Additional tools appear per benchmark: `BrowserNavigate`/`Click`/`Type`/`Scroll`
 Auto-activated by keyword. Tools appear as `{serverName}_{toolName}` (e.g. `engram_mem_session_summary`).
 Manual: `mcp_activate("name")` / `mcp_deactivate("name")`.
 
-Servers: github, filesystem, context7, aws-api, engram.
+Servers: github, filesystem, context7, engram.
 
 ### Local vs Remote
 

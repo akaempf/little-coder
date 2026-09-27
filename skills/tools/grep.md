@@ -6,25 +6,12 @@ priority: 8
 token_cost: 100
 user-invocable: false
 ---
-## `grep` Tool
-Search file contents with regex. Uses ripgrep.
+## `grep` Tool — DO NOT USE
+Do NOT invoke this tool. Its noisy file:line match dumps confuse small local
+models and drive them into loops.
 
-REQUIRED: pattern (regex pattern)
-OPTIONAL: path (directory/file), glob (file glob filter like "*.py"), ignoreCase (bool), literal (bool — treat pattern as literal text), context (lines of context before/after), limit (max matches, default 100)
-
-RULES:
-- Supports full regex syntax (unless `literal: true`)
-- Use `glob` to filter by file type (e.g. "*.py", "*.js")
-- Use `limit` to cap results; default 100
-- Returns matching lines with file path and line number
-- Good for finding function definitions, imports, references
-
-EXAMPLE:
-```tool
-{"name": "grep", "input": {"pattern": "def main", "glob": "*.py"}}
-```
-
-EXAMPLE with path:
-```tool
-{"name": "grep", "input": {"pattern": "TODO|FIXME", "path": "/path/to/project/"}}
-```
+PREFERRED ALTERNATIVES:
+- Inspect a file's contents: `bash` with `sed -n '1,200p' <file>` or `cat`
+- Read a known file: the `read` tool with explicit `offset` and `limit`
+- If you must search, do it inside `bash` with a targeted `grep -n` on a
+  specific file rather than a recursive tool call

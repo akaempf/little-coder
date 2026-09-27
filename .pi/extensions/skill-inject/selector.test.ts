@@ -17,8 +17,6 @@ const INTENT_MAP: Record<string, string[]> = {
   add: ["Edit", "Write"], refactor: ["Edit", "Read"],
   run: ["Bash"], execute: ["Bash"], install: ["Bash"],
   build: ["Bash"], test: ["Bash"],
-  find: ["Glob", "Grep"], search: ["Grep"],
-  grep: ["Grep"], glob: ["Glob"],
   fetch: ["WebFetch"], download: ["WebFetch"], url: ["WebFetch"],
   web: ["WebSearch"],
 };
@@ -46,10 +44,9 @@ describe("intent prediction (INTENT_MAP)", () => {
     const p = predictTools("run the tests and build the project");
     expect(p).toContain("Bash");
   });
-  it("predicts Glob+Grep for 'find all files'", () => {
-    const p = predictTools("find all files matching the pattern");
-    expect(p).toContain("Glob");
-    expect(p).toContain("Grep");
+  it("predicts nothing for search intents (grep/glob triggers removed)", () => {
+    expect(predictTools("find all files matching the pattern")).toEqual([]);
+    expect(predictTools("search the codebase")).toEqual([]);
   });
   it("empty predictions for neutral prompts", () => {
     expect(predictTools("hello there")).toEqual([]);

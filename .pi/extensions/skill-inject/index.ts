@@ -51,8 +51,11 @@ const INTENT_MAP: Record<string, string[]> = {
   train: ["ShellStart"], training: ["ShellStart"], finetune: ["ShellStart"],
   background: ["ShellStart"], watch: ["ShellStart"], serve: ["ShellStart"],
   server: ["ShellStart"], monitor: ["ShellStart"], daemon: ["ShellStart"],
-  find: ["glob", "grep"], search: ["grep"],
-  grep: ["grep"], glob: ["glob"],
+  // NOTE (custom): find/search/grep/glob intent triggers deliberately removed —
+  // the injected grep/glob skill cards overrode user rules at the conversation
+  // tail and made the local model loop. Cards can still surface via
+  // recency/error-recovery, but their bodies now say DO NOT USE (sed/cat
+  // instead) so any residual injection reinforces the rule.
   fetch: ["webfetch"], download: ["webfetch"], url: ["webfetch"],
   web: ["websearch"],
   // Research / browser / evidence

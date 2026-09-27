@@ -227,7 +227,7 @@ class LittleCoderAgent(BaseAgent):
                 tb_shell_handler=tb_shell_handler,
             )
             try:
-                result = await asyncio.to_thread(rpc.prompt_and_collect, prompt, 3600)
+                result = await asyncio.to_thread(rpc.prompt_and_collect, prompt, 900)
                 if log_fh:
                     log_fh.write(f"=== assistant text ===\n{result.assistant_text}\n\n")
                     for tc in result.tool_calls:
